@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm run build:*)",
+      "Bash(npm test)",
+      "Bash(npm test:*)",
+      "Bash(npx create-next-app:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "WebFetch(domain:help.mailtrap.io)",
+      "WebFetch(domain:api-docs.mailtrap.io)",
+      "WebSearch",
+      "Bash(cd:*)",
+      "Bash(wc:*)",
+      "Bash(timeout 10 node:*)",
+      "Bash(move:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object -Property LocalPort,OwningProcess\")",
+      "Bash(docker --version:*)",
+      "Bash(ss:*)",
+      "Bash(lsof:*)",
+      "Bash(PORT=4000 ADMIN_PORT=4001 timeout 8 node:*)",
+      "Bash(PORT=8080 ADMIN_PORT=8081 timeout 8 node:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

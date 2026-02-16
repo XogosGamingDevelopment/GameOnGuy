@@ -1,0 +1,57 @@
+# Game On Dude! - EB Ignore
+# Files to exclude from Elastic Beanstalk deployment
+
+# Git
+.git/
+.gitignore
+
+# Development
+.vscode/
+*.md
+!README.md
+
+# Tests
+tests/
+coverage/
+*.test.ts
+*.spec.ts
+jest.config.js
+
+# Source (we deploy compiled JS only)
+# Note: We include src/ because EB builds on deploy
+# src/
+
+# Website (deployed separately to Amplify)
+website/
+
+# Unity SDK (not needed on server)
+unity-sdk/
+
+# Documentation
+docs/
+
+# Docker (using EB, not containers)
+Dockerfile
+docker-compose.yml
+
+# AWS configs (not needed in deployment)
+aws/
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+
+# Build artifacts (rebuilt on deploy)
+dist/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db

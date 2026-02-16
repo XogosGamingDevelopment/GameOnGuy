@@ -1,0 +1,84 @@
+# Game On Dude! - Docker Compose
+# www.gameonguy.com
+# For local development and testing
+
+version: '3.8'
+
+services:
+  # Main game server
+  gameondude-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"   # WebSocket/Game server
+      - "3001:3001"   # Admin API
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - ADMIN_PORT=3001
+      - WS_PATH=/ws
+      - JWT_SECRET=${JWT_SECRET:-gameondude-dev-secret-change-me}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=gameondude
+      - DB_USER=gameondude
+      - DB_PASSWORD=${DB_PASSWORD:-gameondude_dev_password}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=debug
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - gameondude-network
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=gameondude
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-gameondude_dev_password}
+      - POSTGRES_DB=gameondude
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    networks:
+      - gameondude-network
+
+  # Redis for pub/sub and caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - gameondude-network
+
+  # Optional: Redis Commander for debugging
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    profiles:
+      - debug
+    networks:
+      - gameondude-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  gameondude-network:
+    driver: bridge

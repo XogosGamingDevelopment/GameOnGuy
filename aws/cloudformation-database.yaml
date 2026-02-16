@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Game On Dude! - Database Infrastructure (RDS PostgreSQL + ElastiCache Redis)
+
+# ============================================================================
+# PARAMETERS
+# ============================================================================
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where resources will be deployed
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for database (use private subnets, need at least 2 AZs)
+
+  EBSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID of Elastic Beanstalk environment
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t4g.micro
+      - db.t4g.small
+    Description: RDS instance type
+
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.t4g.micro
+    Description: ElastiCache node type
+
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+    Description: Database storage in GB
+
+  DBMasterUsername:
+    Type: String
+    Default: gameondude
+    Description: Master username for RDS
+
+# ============================================================================
+# RESOURCES
+# ============================================================================
+Resources:
+  # --------------------------------------------------------------------------
+  # SECURITY GROUPS
+  # --------------------------------------------------------------------------
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub gameondude-db-sg-${Environment}
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EBSecurityGroupId
+          Description: PostgreSQL from Elastic Beanstalk
+      Tags:
+        - Key: Name
+          Value: !Sub gameondude-db-sg-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub gameondude-cache-sg-${Environment}
+      GroupDescription: Security group for ElastiCache Redis
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EBSecurityGroupId
+          Description: Redis from Elastic Beanstalk
+      Tags:
+        - Key: Name
+          Value: !Sub gameondude-cache-sg-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+
+  # --------------------------------------------------------------------------
+  # RDS POSTGRESQL
+  # --------------------------------------------------------------------------
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Game On Dude! RDS
+      DBSubnetGroupName: !Sub gameondude-db-subnet-${Environment}
+      SubnetIds: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub gameondude-db-subnet-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub gameondude-db-${Environment}
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: postgres
+      EngineVersion: '15'
+      MasterUsername: !Ref DBMasterUsername
+      ManageMasterUserPassword: true
+      DBName: gameondude
+      AllocatedStorage: !Ref DBAllocatedStorage
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      StorageEncrypted: true
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: !If [IsProduction, true, false]
+      PubliclyAccessible: false
+      BackupRetentionPeriod: !If [IsProduction, 7, 1]
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "Mon:04:00-Mon:05:00"
+      DeletionProtection: !If [IsProduction, true, false]
+      EnablePerformanceInsights: !If [IsProduction, true, false]
+      CopyTagsToSnapshot: true
+      Tags:
+        - Key: Name
+          Value: !Sub gameondude-db-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: GameOnDude
+
+  # --------------------------------------------------------------------------
+  # ELASTICACHE REDIS
+  # --------------------------------------------------------------------------
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Sub gameondude-cache-subnet-${Environment}
+      Description: Subnet group for Game On Dude! ElastiCache
+      SubnetIds: !Ref SubnetIds
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      ClusterName: !Sub gameondude-redis-${Environment}
+      Engine: redis
+      EngineVersion: "7.0"
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheNodes: 1
+      VpcSecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      PreferredMaintenanceWindow: "Mon:05:00-Mon:06:00"
+      SnapshotRetentionLimit: !If [IsProduction, 7, 0]
+      Tags:
+        - Key: Name
+          Value: !Sub gameondude-redis-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: GameOnDude
+
+# ============================================================================
+# CONDITIONS
+# ============================================================================
+Conditions:
+  IsProduction: !Equals [!Ref Environment, production]
+
+# ============================================================================
+# OUTPUTS
+# ============================================================================
+Outputs:
+  DatabaseEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabaseEndpoint
+
+  DatabasePort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt Database.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabasePort
+
+  DatabaseSecretArn:
+    Description: ARN of the secret containing database credentials
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabaseSecretArn
+
+  RedisEndpoint:
+    Description: ElastiCache Redis endpoint
+    Value: !GetAtt RedisCluster.RedisEndpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-RedisEndpoint
+
+  RedisPort:
+    Description: ElastiCache Redis port
+    Value: !GetAtt RedisCluster.RedisEndpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-RedisPort
+
+  DatabaseSecurityGroupId:
+    Description: Database security group ID
+    Value: !Ref DatabaseSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabaseSecurityGroupId
+
+  CacheSecurityGroupId:
+    Description: Cache security group ID
+    Value: !Ref CacheSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-CacheSecurityGroupId
