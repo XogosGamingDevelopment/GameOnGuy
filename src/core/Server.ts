@@ -98,7 +98,10 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
     // Initialize services
     this.authService = new AuthService();
     this.roomManager = new RoomManager(this);
-    this.matchmaking = new MatchmakingService(this.roomManager);
+    this.matchmaking = new MatchmakingService(
+      this.roomManager,
+      (clientId: string) => this.clients.get(clientId)
+    );
 
     // Initialize middleware pipeline
     this.middleware = new MiddlewarePipeline();
@@ -385,6 +388,11 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
   }
 
   private async handleMatchmakeRequest(client: Client, payload: any): Promise<void> {
+    this.log.info(
+      { clientId: client.id, gameType: payload.gameType, authenticated: client.isAuthenticated },
+      'Matchmaking request received'
+    );
+
     if (!client.isAuthenticated) {
       client.sendError('Must be authenticated to matchmake');
       return;
@@ -401,9 +409,22 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
         timestamp: Date.now(),
       });
 
-      // Matchmaking will notify client when match is found
-      this.log.info({ clientId: client.id, ticketId: ticket.id }, 'Matchmaking request created');
+      // Send immediate acknowledgment that matchmaking has started
+      client.send({
+        type: 'matchmake_started',
+        payload: {
+          ticketId: ticket.id,
+          gameType: payload.gameType,
+          estimatedWait: 20, // seconds
+        },
+      });
+
+      this.log.info(
+        { clientId: client.id, ticketId: ticket.id, gameType: payload.gameType },
+        'Matchmaking ticket created and acknowledged'
+      );
     } catch (error: any) {
+      this.log.error({ clientId: client.id, error: error.message }, 'Matchmaking request failed');
       client.sendError(error.message);
     }
   }

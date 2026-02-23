@@ -9,7 +9,11 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { GameOnServer } from '../core/Server';
+import { BotRegistry } from '../bots/BotRegistry';
 import logger from '../core/Logger';
+
+// Build timestamp for deployment verification
+const BUILD_TIMESTAMP = new Date().toISOString();
 
 const log = logger.child({ component: 'AdminServer' });
 
@@ -41,13 +45,21 @@ export function startAdminServer(server: GameOnServer, port: number) {
 
   app.get('/info', (req: Request, res: Response) => {
     res.json({
-      version: '1.0.0',
+      version: '1.0.1',
+      buildTimestamp: BUILD_TIMESTAMP,
       name: 'Game On Dude!',
       uptime: process.uptime(),
       nodeVersion: process.version,
       platform: process.platform,
       memory: process.memoryUsage(),
       registeredGames: server.roomManager.getRegisteredGameTypes(),
+      registeredBots: BotRegistry.getAllBots().map(b => ({
+        type: b.botType,
+        games: b.supportedGames,
+        name: b.metadata?.name,
+      })),
+      botSupportedGames: BotRegistry.getSupportedGameTypes(),
+      matchmakingQueueSize: server.matchmaking.getQueueSize(),
     });
   });
 

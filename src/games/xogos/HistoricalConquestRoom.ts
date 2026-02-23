@@ -8,6 +8,8 @@
 
 import { TurnBasedRoom, TurnBasedRoomOptions, TurnBasedState, TurnAction } from '../TurnBasedRoom';
 import { PlayerState, GameAction } from '../../core/types';
+import { BotManager } from '../../bots/BotManager';
+import logger from '../../core/Logger';
 
 // ============================================================================
 // Types
@@ -132,6 +134,8 @@ export interface HistoricalConquestOptions extends TurnBasedRoomOptions {
   winCondition?: 'elimination' | 'territory' | 'points';
   pointsToWin?: number;
   cardDatabase?: Card[];
+  /** If true, spawn bot immediately (player already waited in matchmaking) */
+  fromMatchmakingTimeout?: boolean;
 }
 
 // ============================================================================
@@ -312,6 +316,8 @@ const DEFAULT_CARDS: Card[] = [
 // Historical Conquest Room Implementation
 // ============================================================================
 
+const hcLog = logger.child({ component: 'HistoricalConquestRoom' });
+
 export class HistoricalConquestRoom extends TurnBasedRoom {
   private readonly startingHandSize: number;
   private readonly maxHandSize: number;
@@ -322,6 +328,12 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
   private readonly cardDatabase: Card[];
   private readonly victoryCondition: 'elimination' | 'territory' | 'points';
   private readonly victoryPoints: number;
+
+  // Bot spawning
+  private botManager: BotManager;
+  private botSpawnTimeout: NodeJS.Timeout | null = null;
+  private readonly BOT_TIMEOUT_MS = 20000; // 20 seconds
+  private readonly spawnBotImmediately: boolean; // If player came from matchmaking timeout
 
   declare protected state: HistoricalConquestState;
 
@@ -343,6 +355,16 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
     this.cardDatabase = options.cardDatabase ?? DEFAULT_CARDS;
     this.victoryCondition = options.winCondition ?? 'elimination';
     this.victoryPoints = options.pointsToWin ?? 20;
+
+    // If player came from matchmaking timeout, spawn bot immediately
+    this.spawnBotImmediately = options.fromMatchmakingTimeout ?? false;
+
+    // Initialize bot manager for room-level bot spawning
+    this.botManager = new BotManager(this as any);
+    hcLog.info(
+      { roomId: this.id, spawnBotImmediately: this.spawnBotImmediately },
+      'HistoricalConquestRoom created with bot support'
+    );
   }
 
   protected initializeState(): HistoricalConquestState {
@@ -384,6 +406,14 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
   protected onPlayerJoin(player: PlayerState): void {
     super.onPlayerJoin(player);
 
+    const playerCount = this.players.size;
+    const isBot = this.botManager.isBot(player.id);
+
+    hcLog.info(
+      { roomId: this.id, playerId: player.id, playerCount, isBot },
+      'Player joined Historical Conquest room'
+    );
+
     // Create player deck (shuffled copy of card database)
     this.state.decks[player.id] = this.shuffleArray([...this.cardDatabase]);
     this.state.hands[player.id] = [];
@@ -400,6 +430,56 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
       influencePerTurn: 1,
       militaryPerTurn: 1,
     };
+
+    // Room-level bot spawning logic
+    if (playerCount === 1 && !isBot) {
+      // First human player joined - spawn bot (immediately or after timeout)
+      const timeoutMs = this.spawnBotImmediately ? 100 : this.BOT_TIMEOUT_MS;
+
+      hcLog.info(
+        {
+          roomId: this.id,
+          timeoutMs,
+          spawnBotImmediately: this.spawnBotImmediately,
+          reason: this.spawnBotImmediately ? 'from matchmaking timeout' : 'normal room join'
+        },
+        'Starting bot spawn timeout'
+      );
+
+      this.botSpawnTimeout = setTimeout(async () => {
+        // Check if still only 1 player after timeout
+        if (this.players.size === 1) {
+          hcLog.info({ roomId: this.id }, 'Spawning bot opponent');
+
+          try {
+            const bot = await this.botManager.spawnBot({
+              difficulty: 50,
+            });
+
+            if (bot) {
+              hcLog.info(
+                { roomId: this.id, botId: bot.id, botName: bot.username },
+                'Bot spawned successfully'
+              );
+            } else {
+              hcLog.error({ roomId: this.id }, 'Failed to spawn bot - no bot returned');
+            }
+          } catch (error) {
+            hcLog.error({ roomId: this.id, error }, 'Error spawning bot');
+          }
+        } else {
+          hcLog.info(
+            { roomId: this.id, playerCount: this.players.size },
+            'Timeout fired but room already has enough players'
+          );
+        }
+      }, timeoutMs);
+    } else if (playerCount === 2 && this.botSpawnTimeout) {
+      // Second player joined - cancel bot timeout
+      hcLog.info({ roomId: this.id }, 'Second player joined - cancelling bot spawn timeout');
+      clearTimeout(this.botSpawnTimeout);
+      this.botSpawnTimeout = null;
+    }
   }
 
   protected onGameBegin(): void {
@@ -1082,5 +1162,27 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
     return shuffled;
+  }
+
+  // ============================================================================
+  // Cleanup
+  // ============================================================================
+
+  public dispose(): void {
+    hcLog.info({ roomId: this.id }, 'Disposing Historical Conquest room');
+
+    // Clear bot spawn timeout
+    if (this.botSpawnTimeout) {
+      clearTimeout(this.botSpawnTimeout);
+      this.botSpawnTimeout = null;
+    }
+
+    // Dispose bot manager
+    if (this.botManager) {
+      this.botManager.dispose();
+    }
+
+    // Call parent dispose
+    super.dispose();
   }
 }

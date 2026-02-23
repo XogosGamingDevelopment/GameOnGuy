@@ -35,6 +35,8 @@ export interface RoomConstructorOptions extends Partial<RoomOptions> {
   id?: string;
   name?: string;
   creatorId?: string;
+  /** If true, room was created from matchmaking timeout - spawn bot immediately */
+  fromMatchmakingTimeout?: boolean;
 }
 
 export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {

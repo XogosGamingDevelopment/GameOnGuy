@@ -27,9 +27,13 @@ import { RealTimeMovementRoom } from './games/RealTimeMovementRoom';
 import { TurnBasedRoom } from './games/TurnBasedRoom';
 import { LightningRoundRoom } from './games/xogos/LightningRoundRoom';
 import { HistoricalConquestRoom } from './games/xogos/HistoricalConquestRoom';
+import { GeoTagRoom } from './games/xogos/GeoTagRoom';
 import { GameOnGames } from './games';
 import logger from './core/Logger';
 import { startAdminServer } from './admin/AdminServer';
+
+// Bot registrations - import to register bots
+import './bots/games/historical-conquest';
 
 // Database and Cache
 import { DatabaseService, getDatabaseService } from './database';
@@ -93,11 +97,17 @@ async function main() {
     await roomSync.start();
   }
 
+  // Import BotRegistry to check registration status
+  const { BotRegistry } = await import('./bots/BotRegistry');
+
   log.info(
     {
       port: process.env.PORT || 3000,
       adminPort,
       registeredGames: server.roomManager.getRegisteredGameTypes(),
+      registeredBots: BotRegistry.getAllBots().map(b => b.botType),
+      botSupportedGames: BotRegistry.getSupportedGameTypes(),
+      historicalConquestBotAvailable: BotRegistry.hasBotsForGame('historical_conquest'),
       database: database?.connected ? 'connected' : 'disabled',
       redis: redis?.connected ? 'connected' : 'disabled',
     },
@@ -229,6 +239,13 @@ function registerGames(server: GameOnServer) {
     GameOnGames.HISTORICAL_CONQUEST.type,
     HistoricalConquestRoom,
     GameOnGames.HISTORICAL_CONQUEST
+  );
+
+  // Register GeoTag (Real-Time Chase)
+  server.roomManager.registerGame(
+    GameOnGames.GEOTAG.type,
+    GeoTagRoom,
+    GameOnGames.GEOTAG
   );
 
   log.info('All game types registered');
@@ -436,4 +453,5 @@ export {
   Buff,
   Territory,
   CombatLogEntry,
+  GeoTagRoom,
 } from './games';
