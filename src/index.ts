@@ -28,6 +28,7 @@ import { TurnBasedRoom } from './games/TurnBasedRoom';
 import { LightningRoundRoom } from './games/xogos/LightningRoundRoom';
 import { HistoricalConquestRoom } from './games/xogos/HistoricalConquestRoom';
 import { GeoTagRoom } from './games/xogos/GeoTagRoom';
+import { TypingRaceRoom } from './games/xogos/TypingRaceRoom';
 import { GameOnGames } from './games';
 import logger from './core/Logger';
 import { startAdminServer } from './admin/AdminServer';
@@ -248,6 +249,13 @@ function registerGames(server: GameOnServer) {
     GameOnGames.GEOTAG
   );
 
+  // Register Typing Race (relay room — Turbo Type: Racing Edition)
+  server.roomManager.registerGame(
+    GameOnGames.TYPING_RACE.type,
+    TypingRaceRoom,
+    GameOnGames.TYPING_RACE
+  );
+
   log.info('All game types registered');
 }
 
@@ -454,4 +462,6 @@ export {
   Territory,
   CombatLogEntry,
   GeoTagRoom,
+  TypingRaceRoom,
+  TypingRaceRoomOptions,
 } from './games';

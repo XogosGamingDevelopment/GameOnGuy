@@ -21,3 +21,5 @@ export {
   Territory,
   CombatLogEntry,
 } from './HistoricalConquestRoom';
+export { GeoTagRoom } from './GeoTagRoom';
+export { TypingRaceRoom, TypingRaceRoomOptions } from './TypingRaceRoom';

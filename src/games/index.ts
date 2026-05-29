@@ -62,6 +62,22 @@ export const GameOnGames = {
     maxPlayers: 15,
     defaultTickRate: 20,
   },
+  GEOTAG: {
+    type: 'geotag',
+    name: 'GeoTag',
+    category: GameCategories.REAL_TIME,
+    minPlayers: 2,
+    maxPlayers: 8,
+    defaultTickRate: 2,
+  },
+  TYPING_RACE: {
+    type: 'typing_race',
+    name: 'Typing Race',
+    category: GameCategories.REAL_TIME,
+    minPlayers: 2,
+    maxPlayers: 8,
+    defaultTickRate: 1,
+  },
 } as const;
 
 // Backwards compatibility alias
