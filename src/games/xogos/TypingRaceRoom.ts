@@ -171,6 +171,12 @@ export class TypingRaceRoom extends Room<TypingRaceState> {
   /**
    * Override the base handler so race actions are accepted as soon as players
    * are in the room, instead of being rejected with "Game not in progress".
+   *
+   * We also accept two payload shape variations that integrators write
+   * intuitively when reading the spec:
+   *   - Action name in `type` (canonical) OR `action` (Turbo Type sent this).
+   *   - Data nested under `data` (canonical) OR flat at the payload root.
+   * Either shape resolves to the same `GameAction` internally.
    */
   public handleGameAction(client: Client, action: any): void {
     const player = this.players.get(client.id);
@@ -178,10 +184,15 @@ export class TypingRaceRoom extends Room<TypingRaceState> {
 
     player.lastActivity = Date.now();
 
+    const actionName = action?.type ?? action?.action;
+    // If `data` isn't explicitly nested, treat the whole payload as the data
+    // bag (so `{ action:"progress", position:50, wpm:60, accuracy:90 }` works).
+    const data = action?.data ?? action;
+
     const gameAction: GameAction = {
-      type: action?.type,
+      type: actionName,
       playerId: client.id,
-      data: action?.data,
+      data,
       timestamp: Date.now(),
       sequence: action?.sequence,
     };
@@ -200,8 +211,20 @@ export class TypingRaceRoom extends Room<TypingRaceState> {
       case 'finish':
         this.handleFinish(player, (action.data ?? {}) as FinishData);
         break;
-      default:
-        this.log.warn({ action: action.type }, 'Unknown typing_race action');
+      default: {
+        // Send a real error back. Because we shadow the base "Game not in
+        // progress" gate, silence would be confusing — make unrecognized
+        // action names visible to the integrator.
+        this.log.warn(
+          { action: action.type, playerId: player.id },
+          'Unknown typing_race action'
+        );
+        const c = this.clients.get(player.id);
+        c?.sendError(
+          `Unknown typing_race action: ${action.type ?? '(missing action name; send payload.type or payload.action)'}`
+        );
+        break;
+      }
     }
   }
 

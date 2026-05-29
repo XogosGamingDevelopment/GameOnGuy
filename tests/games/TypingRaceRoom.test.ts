@@ -35,6 +35,10 @@ class FakeClient {
     this.sent.push(message);
   }
 
+  sendError(message: string, code?: string): void {
+    this.sent.push({ type: 'error', payload: { message, code } });
+  }
+
   setRoom(roomId: string | undefined): void {
     this.currentRoomId = roomId;
   }
@@ -221,6 +225,75 @@ describe('TypingRaceRoom', () => {
       expect(update.payload.state.status).toBe('racing');
       expect(update.payload.state.text).toBe('second');
       expect(update.payload.state.players.every((pl: any) => pl.position === 0 && !pl.finished)).toBe(true);
+    });
+  });
+
+  // The Turbo Type bug fix: payloads using `action` for the action name (or
+  // with data fields flat at the payload root) must work too. Without these,
+  // game_action was silently dropped because the dispatcher only looked at
+  // `payload.type`.
+  describe('lenient payload shape', () => {
+    it('accepts payload.action as the action name (Turbo Type variant)', async () => {
+      const room = await makeRoom([host, p2]);
+
+      // race_setup using `action` instead of `type`, nested data.
+      room.handleGameAction(asClient(host), {
+        action: 'race_setup',
+        data: { text: 'hello world', startAt: 12345 },
+      });
+
+      const update = p2.last('state_update');
+      expect(update.payload.state.status).toBe('racing');
+      expect(update.payload.state.text).toBe('hello world');
+      expect(update.payload.state.startAt).toBe(12345);
+      // No error sent — action was recognized.
+      expect(host.countOf('error')).toBe(0);
+    });
+
+    it('accepts a flat payload (data fields at payload root)', async () => {
+      const room = await makeRoom([host, p2]);
+
+      // race_setup with flat fields, then progress flat too.
+      room.handleGameAction(asClient(host), {
+        action: 'race_setup',
+        text: 'flat sentence',
+        startAt: 77,
+      });
+      room.handleGameAction(asClient(p2), {
+        type: 'progress',
+        position: 42,
+        wpm: 33,
+        accuracy: 88,
+      });
+
+      const update = host.last('state_update');
+      expect(update.payload.state.status).toBe('racing');
+      expect(update.payload.state.text).toBe('flat sentence');
+      const bob = update.payload.state.players.find((pl: any) => pl.id === p2.id);
+      expect(bob.position).toBe(42);
+      expect(bob.wpm).toBe(33);
+      expect(bob.accuracy).toBe(88);
+    });
+
+    it('sends an explicit error for unrecognized action names', async () => {
+      const room = await makeRoom([host, p2]);
+
+      room.handleGameAction(asClient(host), { action: 'totally_bogus_action', data: {} });
+
+      const err = host.last('error');
+      expect(err).toBeDefined();
+      expect(err.payload.message).toMatch(/Unknown typing_race action/);
+    });
+
+    it('sends an explicit error when the action name is missing entirely', async () => {
+      const room = await makeRoom([host, p2]);
+
+      // No `type`, no `action`, no `data`.
+      room.handleGameAction(asClient(host), { foo: 'bar' });
+
+      const err = host.last('error');
+      expect(err).toBeDefined();
+      expect(err.payload.message).toMatch(/missing action name/);
     });
   });
 });
