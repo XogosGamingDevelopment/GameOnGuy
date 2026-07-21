@@ -2,7 +2,7 @@
 
 **Website**: [www.gameonguy.com](https://www.gameonguy.com)
 
-> **For AI Developers / next session**: skip the "Current Status (As of December 2024)" table below — it's a historical snapshot. The accurate current state lives in **`## 🚀 RESUME HERE - CURRENT PROJECT STATE`** further down (just past the Phase 11 session entry). Read that section first, then come back up here if you need historical context.
+> **For AI Developers / next session**: skip the "Current Status (As of December 2024)" table below — it's a historical snapshot. The accurate current state lives in **`## 🚀 RESUME HERE - CURRENT PROJECT STATE`** further down (just past the Phase 14 session entry). Read that section first, then come back up here if you need historical context.
 >
 > Before deploying anything: read "⚠️ READ THIS BEFORE YOU DEPLOY ANYTHING" inside the RESUME HERE block. `eb deploy` does NOT work here — using it ships broken HEAD to prod.
 >
@@ -1395,12 +1395,15 @@ The contact form uses **Mailtrap** for transactional email delivery.
   - This is the doc external teams read FIRST; `docs/
     MULTIPLAYER_INTEGRATION_GUIDE.md` remains the full reference.
 
-- **Letter to the HC development team** asking the open integration questions
-  (server role: relay vs simulated, their action list, matchmaking prefs) was
-  drafted for the user to send. The old bot-lessons message vocabulary
-  (`servercount2`/`rc`/`splb`/…) only survives in the retired bot code and
-  historical docs — the new integration should be specified fresh by the HC
-  team's answers.
+- **Letter to the HC development team SENT** (via the user) with 6 questions:
+  (1) relay vs simulated room, (2) their exact action JSON — copied, not
+  paraphrased, (3) matchmaking prefs, (4) build targets, (5) mid-game
+  disconnect policy, (6) extras (persistence/private rooms/rematch). They
+  were told to read `website/public/gameon-multiplayer-ai-integration-guide.md`
+  first. **Their answers drive the next work item** (see RESUME HERE). The
+  old bot-lessons message vocabulary (`servercount2`/`rc`/`splb`/…) only
+  survives in the retired bot code and historical docs — the new integration
+  gets specified fresh by their answers.
 
 - **Tests:** 226/226 passing, build clean. (No tests covered the removed
   bot-spawn path; TypingRace/auth/etc. all unaffected.)
@@ -1427,7 +1430,7 @@ The contact form uses **Mailtrap** for transactional email delivery.
 **Production URL:** `wss://multiplayer.gameonguy.com/ws`
 **Production version:** `hc-bots-opt-in-260721-114103` (env `gameonguy-production`, Ready/Green/Ok — Phase 13 security hardening + Phase 14 bots-opt-in live)
 **Server-side bots:** OFF for all games (opt-in since Phase 14). Historical Conquest: The Digital runs bots client-side; solo HC matchmaking gets `matchmake_timeout` at ~20 s.
-**GitHub `main` HEAD:** see `git log` — Phase 13 is `4975912`; Phase 14 committed after it
+**GitHub `main` HEAD:** `db5f02e` — "Phase 14: server-side bots now opt-in; HC: The Digital re-integration" (Phase 13 = `4975912`, both pushed to origin/main)
 **Tests:** 226/226 PASSING (`npm test`)
 **Build:** clean (`npm run build`)
 **Rollback labels:** `sec-hardening-260721-100650` (pre-Phase-14), `tr-typing-race-payload-shape-260529-fix` (pre-Phase-13)
@@ -1543,45 +1546,20 @@ If any of these fail after a deploy, you've broken something — roll back via `
 
 ---
 
-### ⚠️ Still blocking: Unity WebGL rebuild (Historical Conquest)
+### 🏛️ Historical Conquest status: OLD integration retired, NEW one awaiting HC team's answers (Phase 14)
 
-This was the #1 blocker before this session and it still is. **Server-side everything works**; the Historical Conquest WebGL client at `historicalconquest.org` does not yet have the Game On Dude! SDK compiled in, so it can't connect. The integration code is sitting in the Unity project under `Assets/Scripts/GameOn/` (see "Files Added to Historical Conquest Unity Project" below). Until the Historical Conquest team installs the required packages, wires up the button, and rebuilds the WebGL, no Historical Conquest player can hit production.
+**The old "Unity WebGL rebuild" blocker is OBSOLETE.** That plan (Phases 6–10: our SDK dropped into their old Unity project, server-side bots, WebGL rebuild that never happened) is superseded. Historical Conquest is reconnecting as a **new program — "Historical Conquest: The Digital"** — that runs its own bots client-side.
 
-This is NOT a Game On Dude! server issue — it's an action item for the Historical Conquest Unity team.
+**Where the new integration stands (July 21, 2026):**
+- Server side is READY: `historical_conquest` game type is registered; matchmaking pairs 2 humans; solo players get `matchmake_timeout` at ~20 s (their client then starts a local bot game). Verified live by `test-hc-no-bot-production.js`.
+- Server-side bots for HC are OFF (opt-in framework retained — see Phase 14 entry).
+- **⏳ WAITING ON: the HC team's answers to the 6-question integration letter** the user sent them (drafted in the Phase 14 session). The questions: (1) relay vs simulated room, (2) their exact action JSON — copied, not paraphrased, (3) matchmaking prefs (players/timeout/ranked), (4) build targets (WebGL/standalone/mobile), (5) mid-game disconnect policy, (6) extras (persistence, private rooms, rematch). They were also given `website/public/gameon-multiplayer-ai-integration-guide.md` to read first.
 
----
-
-### IMMEDIATE NEXT STEPS (For Historical Conquest to Go Live)
-
-**In Unity (Historical Conquest project):**
-
-#### Step 1: Install Required Packages
-Open Unity Package Manager (Window > Package Manager):
-1. Click "+" > "Add package from git URL"
-2. Enter: `https://github.com/endel/NativeWebSocket.git`
-3. Click "Add"
-4. Then add Newtonsoft.Json: `com.unity.nuget.newtonsoft-json`
-
-#### Step 2: Add Script to Scene
-1. In your main scene (GameScene or MainMenu)
-2. Create empty GameObject named "GameOnMultiplayer"
-3. Add `HistoricalConquestMultiplayer` component to it
-
-#### Step 3: Connect Find Match Button
-1. Find your "Find Match" or "Multiplayer" button in the UI
-2. Set its OnClick event to call: `ServerManager.FindOnlineMatch()`
-
-#### Step 4: Build and Deploy WebGL
-1. File > Build Settings > WebGL
-2. Build
-3. Deploy to historicalconquest.org
-
-#### Step 5: Test
-1. Open https://www.historicalconquest.org/Build/index.html
-2. Open browser DevTools (F12) > Network tab
-3. Click "Find Match"
-4. Should see WebSocket connection to `multiplayer.gameonguy.com`
-5. Wait ~20 seconds for bot to appear
+**When their answers arrive, the next developer should:**
+1. If they choose **relay** (recommended & likely): model the room on `src/games/xogos/TypingRaceRoom.ts` — override `handleGameAction()` to bypass the `IN_PROGRESS` gate, accept their exact action key shapes, broadcast `state_update`, declare results. If **simulated**: adapt the existing `HistoricalConquestRoom` logic to their rules.
+2. Write a verification script that speaks **their exact wire shapes** (the Phase 12 lesson — `test-typing-race-action-key.js` is the template) BEFORE telling them it works.
+3. Configure matchmaking per their answers via `matchmaking.configureGameMatchmaking('historical_conquest', {...})` if defaults (2 players, 20 s) don't fit.
+4. Deploy via the create-zip flow, run smoke tests, send them the confirmation + any client-facing notes.
 
 ---
 
@@ -1591,15 +1569,16 @@ cd "C:\Users\edwar\Documents\Business\Xogos Gaming\0. Xogos Code\9. Multiplayer 
 npm run build && npm start
 ```
 
-### Test Bot Spawning on Production
+### Test HC Matchmaking on Production (no bot expected)
 ```bash
-node test-bot-production.js
+node test-hc-no-bot-production.js
 ```
-Expected output: Bot should spawn at ~20 seconds with a name like "Rowan" or "Parker"
+Expected output: `matchmake_timeout` at ~20 seconds and **no** bot/room join — PASS banner. (`test-bot-production.js` is the legacy inverse test; it now "fails" by design.)
 
 ---
 
-### Files Added to Historical Conquest Unity Project
+### 📜 HISTORICAL: Files added to the OLD Historical Conquest Unity project (Phases 6–10, superseded)
+These were dropped into the old Unity project for the integration that never shipped (WebGL was never rebuilt). Kept for reference only — HC: The Digital is a new program integrating fresh.
 Location: `C:\Users\edwar\Documents\Business\Xogos Gaming\0. Xogos Code\1. Historical Conquest\Assets\Scripts\GameOn\`
 
 | File | Purpose |
@@ -1607,11 +1586,7 @@ Location: `C:\Users\edwar\Documents\Business\Xogos Gaming\0. Xogos Code\1. Histo
 | `GameOnClient.cs` | WebSocket SDK for connecting to server |
 | `HistoricalConquestMultiplayer.cs` | Integration with GameManager, handles matchmaking & bot detection |
 | `SETUP_INSTRUCTIONS.md` | Detailed setup guide |
-
-### Files Modified in Historical Conquest
-| File | Changes |
-|------|---------|
-| `ServerManager.cs` | Added `FindOnlineMatch()` method with WebGL/Steam platform detection |
+| `ServerManager.cs` (modified) | Added `FindOnlineMatch()` with WebGL/Steam platform detection |
 
 ---
 
@@ -1625,23 +1600,21 @@ Before touching anything that ships to prod, re-read "⚠️ READ THIS BEFORE YO
 #### 1. Verify the server is healthy before doing anything
 ```bash
 npm install                              # if first time
-npm test                                 # expect 212 passing
+npm test                                 # expect 226 passing
 npm run build                            # expect clean tsc
 curl https://multiplayer.gameonguy.com/health      # expect {"status":"ok",...}
 node test-typing-race-action-key.js      # Turbo Type wire shape (the one prod cared about)
 node test-typing-race-production.js      # canonical typing_race shape (regression)
-node test-bot-production.js              # bot smoke test (~20s wait)
+node test-hc-no-bot-production.js        # HC: matchmake_timeout ~20s, NO bot (~25s wait)
 ```
-If any of these are red, fix that before adding scope.
+If any of these are red, fix that before adding scope. (Do NOT run `test-bot-production.js` expecting success — it asserts the retired bot behavior and fails by design since Phase 14.)
 
 #### 2. Outstanding work, in rough priority order
 
-- **🔴 Commit Phase 13 to git.** Deployed and verified on prod, but not committed: `src/auth/AuthService.ts`, `src/core/Server.ts`, `src/admin/AdminServer.ts`, `tests/auth/AuthService.test.ts`, `docs/MULTIPLAYER_INTEGRATION_GUIDE.md`, `docs/UNITY_INTEGRATION.md`, `BUILD.md`.
-- **🔴 Unity WebGL rebuild (Historical Conquest team).** Same as it's been — server is fine, client doesn't connect. Action items are listed under "IMMEDIATE NEXT STEPS (For Historical Conquest to Go Live)" below. This is on the Unity team, not on this server repo.
+- **🔴 Historical Conquest: The Digital integration — waiting on the HC team's answers.** The 6-question letter went out at the end of Phase 14. When answers arrive, follow the step-by-step plan in the "🏛️ Historical Conquest status" section above (relay room modeled on TypingRaceRoom is the likely shape; verification script in THEIR wire shapes before declaring success).
 - **🟡 Optional prod env hardening:** rotate `JWT_SECRET` to a 48+ byte random value (`openssl rand -base64 48`; only guests use auth today, so rotation is free); set `ADMIN_API_KEY` if remote admin API access is ever needed. (The leftover `YOUR_ENDPOINT`/`YOUR_PASSWORD` vars were removed in Phase 13.)
-- **🟡 Long-standing uncommitted WIP cleanup.** Roughly 20 files in `src/bots/`, `src/database/`, `src/matchmaking/`, `src/games/xogos/HistoricalConquestRoom.ts`, `db/init.sql`, `package.json`/lock, and the entire website tree are modified vs HEAD. This code has been running on prod for months. Phase 11 deliberately did not commit it (one focused commit was healthier than one giant snapshot). When you have a low-risk window, walk the diff file-by-file and commit them in logical chunks so git stops lying about reality.
-- **🟡 BUILD.md history catchup.** Phases 7–10 entries live in the BUILD.md working copy but are not in git HEAD (BUILD.md is part of the WIP pile above). When you tackle the WIP cleanup, fold BUILD.md in.
-- **🟢 Short room code (Turbo Type nice-to-have).** Rooms still return UUIDs in `payload.id`. Turbo Type tolerates UUIDs and didn't block on this. Implement as a non-breaking addition — extra field, UUID still valid — so existing games (Historical Conquest matchmaking, etc.) keep working. Don't replace the UUID; the room manager and the bot tests look rooms up by it.
+- **🟡 Long-standing uncommitted WIP cleanup — SHRUNK in Phases 13–14.** Now committed: BUILD.md, AuthService, Server.ts, AdminServer, MatchmakingService, HistoricalConquestRoom, both integration guides. Still uncommitted vs HEAD: `src/bots/` (months-old bot changes), `src/database/` repositories, `db/init.sql`, `package.json`/lock, `.ebextensions/03-https.config`, and the website tree (including the Phase 7 auth system). This code has been running on prod for months. When you have a low-risk window, walk the diff file-by-file and commit in logical chunks so git stops lying about reality.
+- **🟢 Short room code (Turbo Type nice-to-have).** Rooms still return UUIDs in `payload.id`. Turbo Type tolerates UUIDs and didn't block on this. Implement as a non-breaking addition — extra field, UUID still valid — so existing games keep working. Don't replace the UUID; the room manager looks rooms up by it.
 - **🟢 Remaining game logic:** Number Munchers (grid math), Panic Attack (social deduction), TimeQuest (chronological ordering). These are registered as stubs against base classes; full rules not yet implemented.
 - **🟢 Production hardening:** CloudWatch alarms, load testing, security audit. SSL/TLS is already done (covered by ACM cert + 03-https.config + custom domain).
 - **🟢 Marketing site auth (Phase 7).** Pages and API routes for login/register/dashboard exist locally under `website/src/app/{login,register,dashboard,verify-email}` and `website/src/app/api/auth/*`. Never committed. If you ship them, also commit them.
@@ -1949,7 +1922,7 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 | Game | Type | Status |
 |------|------|--------|
 | Lightning Round | Trivia | ✅ Complete |
-| Historical Conquest | Turn-Based | ✅ Complete with bot AI |
+| Historical Conquest | Turn-Based | 🔄 Re-integrating as "HC: The Digital" (server-side bots retired Phase 14; awaiting HC team's spec) |
 | GeoTag | Geography Chase | ✅ Complete |
 | Typing Race | Relay (Turbo Type) | ✅ Live on prod |
 | TimeQuest | Trivia | ❌ Not started |
@@ -1981,10 +1954,11 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 ## Outstanding Work
 
 ### 🔴 Critical (Blocking)
-1. **Unity WebGL Rebuild** - Historical Conquest client doesn't connect to server
-   - SDK files are in `Assets/Scripts/GameOn/`
-   - Need NativeWebSocket + Newtonsoft.Json packages installed
-   - Need new WebGL build deployed to historicalconquest.org
+1. **Historical Conquest: The Digital integration** — waiting on the HC team's
+   answers to the Phase 14 letter (relay vs simulated, exact action JSON,
+   matchmaking prefs, build targets, disconnect policy, extras). Server side
+   is otherwise ready. Full plan: "🏛️ Historical Conquest status" in the
+   RESUME HERE block.
 
 ### 🟡 Important
 1. **Website Auth System** - Code written in Phase 7 but NOT committed
@@ -1992,12 +1966,14 @@ const room = new HistoricalConquestRoom('historical_conquest', {
    - Files in `website/src/app/login`, `/register`, `/dashboard`, `/verify-email`
    - API routes in `website/src/app/api/auth/*`
 2. **Remaining Games** - Number Munchers, Panic Attack, TimeQuest
+3. **Remaining uncommitted WIP** - `src/bots/`, `src/database/`, `db/init.sql`,
+   `package.json`/lock, `.ebextensions/03-https.config`, website tree
 
 ### 🟢 Nice to Have
-1. SSL/TLS configuration for production
-2. CloudWatch integration for alerting
-3. Load testing and performance benchmarks
-4. Security audit
+1. CloudWatch integration for alerting (SSL/TLS is DONE — ACM cert + 443 listener)
+2. Load testing and performance benchmarks
+3. Follow-up security items: rotate JWT_SECRET (48+ bytes), set ADMIN_API_KEY
+4. Short room codes (Turbo Type nice-to-have)
 
 ---
 
@@ -2005,16 +1981,17 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 *Built for Game On Dude! - www.gameonguy.com*
 *Production Server: wss://multiplayer.gameonguy.com/ws*
 *Production Version: hc-bots-opt-in-260721-114103 (Phases 13+14 live)*
-*GitHub `main` HEAD: 7865a4a (Phase 13 not yet committed)*
+*GitHub `main` HEAD: db5f02e — "Phase 14: server-side bots now opt-in; HC: The Digital re-integration" (Phase 13 = 4975912)*
 *226 Unit Tests Passing*
 *7 Games Registered (Lightning Round, Historical Conquest, GeoTag, Typing Race, TimeQuest, Number Munchers, Panic Attack)*
-*Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md*
+*Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md (AI-assistant version: website/public/gameon-multiplayer-ai-integration-guide.md)*
 *24+ Website Routes*
-*Developed with Claude Opus 4.8*
+*Developed with Claude Opus 4.8 / Claude Fable 5*
 
-**Current Status:** ✅ Server is DEPLOYED and WORKING.
-- ✅ Historical Conquest bot loop (spawn, play, attack, accept) — live since Phase 9.
-- ✅ Typing Race relay (`gameType: "typing_race"`) — live since Phase 11, hardened in Phase 12 (May 29, 2026) to accept Turbo Type's `payload.action` wire shape and to return real errors on unknown actions. Verified end-to-end against prod by `test-typing-race-action-key.js` and `test-typing-race-production.js`. Turbo Type's existing client now works with no further changes.
-- ⚠️ **Unity WebGL rebuild is still the #1 blocker for Historical Conquest** — server is fine, the live WebGL just doesn't have the Game On Dude! SDK compiled in.
+**Current Status:** ✅ Server is DEPLOYED and WORKING (Phases 13+14 live as `hc-bots-opt-in-260721-114103`).
+- ✅ Phase 13 security hardening live: JWT fail-fast, guest_ ID namespacing, 1 MiB message cap, admin API gate. Prod env cleaned (junk vars removed).
+- ✅ Server-side bots OFF for all games (opt-in since Phase 14; framework + HC reference bot preserved).
+- ✅ Typing Race relay (`gameType: "typing_race"`) — live since Phase 11, hardened in Phase 12. Verified end-to-end after every deploy by `test-typing-race-action-key.js`.
+- ⏳ **Historical Conquest: The Digital — waiting on the HC team's answers to the Phase 14 integration letter.** Server side is ready (matchmaking pairs humans; solo → `matchmake_timeout` ~20 s; verified by `test-hc-no-bot-production.js`). The old WebGL-rebuild blocker is obsolete.
 
 **Deploy reminder:** use `node create-zip.js` + the AWS CLI sequence in the RESUME HERE block. **`eb deploy` is broken for this repo** (ships git HEAD which is intentionally behind reality).
