@@ -1,6 +1,6 @@
-# Xogos Unity Integration Guide
+# GameOn Unity Integration Guide
 
-This guide explains how to integrate the Xogos Multiplayer Server with your Unity project.
+This guide explains how to integrate the GameOn Multiplayer Server with your Unity project.
 
 ## Table of Contents
 
@@ -26,13 +26,13 @@ This guide explains how to integrate the Xogos Multiplayer Server with your Unit
 Copy the following files from `unity-sdk/` to your Unity project's `Assets/Scripts/Networking/` folder:
 
 ```
-XogosClient.cs              - Low-level WebSocket client
-XogosNetworkManager.cs      - High-level API
-XogosNetworkIdentity.cs     - Network object identity
-XogosPrediction.cs          - Client-side prediction
-XogosTriviaManager.cs       - Trivia game manager
-XogosTurnBasedManager.cs    - Turn-based game manager
-XogosMovementManager.cs     - Real-time movement manager
+GameOnClient.cs              - Low-level WebSocket client
+GameOnNetworkManager.cs      - High-level API
+GameOnNetworkIdentity.cs     - Network object identity
+GameOnPrediction.cs          - Client-side prediction
+GameOnTriviaManager.cs       - Trivia game manager
+GameOnTurnBasedManager.cs    - Turn-based game manager
+GameOnMovementManager.cs     - Real-time movement manager
 ```
 
 ### 2. Add Dependencies
@@ -52,22 +52,22 @@ https://github.com/sta/websocket-sharp
 ### 3. Create Network Manager GameObject
 
 Create an empty GameObject in your scene and add:
-- `XogosNetworkManager` component
-- Game-specific manager (`XogosTriviaManager`, `XogosTurnBasedManager`, or `XogosMovementManager`)
+- `GameOnNetworkManager` component
+- Game-specific manager (`GameOnTriviaManager`, `GameOnTurnBasedManager`, or `GameOnMovementManager`)
 
 ---
 
 ## Basic Connection
 
-### Setting Up XogosNetworkManager
+### Setting Up GameOnNetworkManager
 
 ```csharp
-using Xogos.Networking;
+using GameOn.Networking;
 using UnityEngine;
 
 public class GameManager : MonoBehaviour
 {
-    [SerializeField] private XogosNetworkManager networkManager;
+    [SerializeField] private GameOnNetworkManager networkManager;
 
     private void Start()
     {
@@ -77,12 +77,15 @@ public class GameManager : MonoBehaviour
         networkManager.OnError += HandleError;
 
         // Connect to server
+        // Local development:
         networkManager.Connect("ws://localhost:3000/ws");
+        // Production (use this URL exactly — see MULTIPLAYER_INTEGRATION_GUIDE.md):
+        // networkManager.Connect("wss://multiplayer.gameonguy.com/ws");
     }
 
     private void HandleConnected()
     {
-        Debug.Log("Connected to Xogos server!");
+        Debug.Log("Connected to GameOn server!");
     }
 
     private void HandleDisconnected(string reason)
@@ -202,14 +205,14 @@ networkManager.OnMatchFound += (roomInfo) =>
 
 ### Trivia Games
 
-Use `XogosTriviaManager` for Lightning Round and TimeQuest.
+Use `GameOnTriviaManager` for Lightning Round and TimeQuest.
 
 ```csharp
-using Xogos.Networking;
+using GameOn.Networking;
 
 public class TriviaGameController : MonoBehaviour
 {
-    [SerializeField] private XogosTriviaManager triviaManager;
+    [SerializeField] private GameOnTriviaManager triviaManager;
     [SerializeField] private QuestionUI questionUI;
     [SerializeField] private LeaderboardUI leaderboardUI;
 
@@ -277,14 +280,14 @@ public class TriviaGameController : MonoBehaviour
 
 ### Turn-Based Games
 
-Use `XogosTurnBasedManager` for Historical Conquest.
+Use `GameOnTurnBasedManager` for Historical Conquest.
 
 ```csharp
-using Xogos.Networking;
+using GameOn.Networking;
 
 public class CardGameController : MonoBehaviour
 {
-    [SerializeField] private XogosTurnBasedManager turnManager;
+    [SerializeField] private GameOnTurnBasedManager turnManager;
     [SerializeField] private CardHandUI handUI;
     [SerializeField] private BattlefieldUI battlefieldUI;
 
@@ -355,14 +358,14 @@ public class CardGameController : MonoBehaviour
 
 ### Real-Time Movement Games
 
-Use `XogosMovementManager` for Number Munchers and Panic Attach.
+Use `GameOnMovementManager` for Number Munchers and Panic Attach.
 
 ```csharp
-using Xogos.Networking;
+using GameOn.Networking;
 
 public class MovementGameController : MonoBehaviour
 {
-    [SerializeField] private XogosMovementManager movementManager;
+    [SerializeField] private GameOnMovementManager movementManager;
     [SerializeField] private Transform localPlayerTransform;
 
     private Dictionary<string, Transform> otherPlayers = new Dictionary<string, Transform>();
@@ -463,7 +466,7 @@ networkManager.OnStateUpdate += (state) =>
 For high-frequency updates in movement games, use interpolation:
 
 ```csharp
-// The XogosMovementManager handles interpolation automatically
+// The GameOnMovementManager handles interpolation automatically
 // Configure in inspector:
 // - Interpolation Delay: 100ms (typical)
 // - Use Interpolation: true
@@ -476,8 +479,8 @@ For high-frequency updates in movement games, use interpolation:
 For responsive movement games, enable client-side prediction:
 
 ```csharp
-// Add XogosPrediction component to your player
-[SerializeField] private XogosPrediction prediction;
+// Add GameOnPrediction component to your player
+[SerializeField] private GameOnPrediction prediction;
 
 // Configure settings
 prediction.SetPredictionEnabled(true);
@@ -558,7 +561,7 @@ private void OnDestroy()
 For movement games, buffer input to smooth out network jitter:
 
 ```csharp
-// Already handled by XogosMovementManager
+// Already handled by GameOnMovementManager
 // Configure inputSendRate to balance responsiveness vs bandwidth
 ```
 
@@ -635,7 +638,7 @@ npm start
 
 If you're migrating from Photon PUN, here's a mapping:
 
-| Photon | Xogos |
+| Photon | GameOn |
 |--------|-------|
 | `PhotonNetwork.Connect()` | `networkManager.Connect(url)` |
 | `PhotonNetwork.JoinRoom()` | `networkManager.JoinRoom(roomId)` |
@@ -643,7 +646,7 @@ If you're migrating from Photon PUN, here's a mapping:
 | `[PunRPC]` | `networkManager.SendGameAction()` |
 | `OnJoinedRoom()` | `networkManager.OnRoomJoined` |
 | `PhotonNetwork.Instantiate()` | Server-authoritative spawning |
-| `PhotonTransformView` | `XogosMovementManager` + prediction |
+| `PhotonTransformView` | `GameOnMovementManager` + prediction |
 
 ---
 
@@ -656,4 +659,4 @@ For issues and questions:
 ---
 
 *Last Updated: December 2024*
-*Compatible with Xogos Multiplayer Server v1.0*
+*Compatible with GameOn Multiplayer Server v1.0*

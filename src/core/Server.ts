@@ -93,6 +93,9 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
     this.wss = new WebSocketServer({
       server: this.httpServer,
       path: this.config.wsPath,
+      // Security: cap message size (ws default is 100 MiB — a DoS vector).
+      // 1 MiB is far above any legitimate game message.
+      maxPayload: 1024 * 1024,
     });
 
     // Initialize services

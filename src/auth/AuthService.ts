@@ -18,6 +18,17 @@ interface AuthResult {
   error?: string;
 }
 
+/** Known placeholder secrets that must never be used in production. */
+const PLACEHOLDER_SECRETS = new Set([
+  'gameondude-dev-secret-change-in-production',
+  'your-super-secret-jwt-key-change-in-production',
+  'your-secret-here',
+  'gameondude-dev-secret-change-me',
+]);
+
+const MAX_GUEST_ID_LENGTH = 64;
+const MAX_USERNAME_LENGTH = 32;
+
 export class AuthService {
   private readonly jwtSecret: string;
   private readonly jwtExpiry: string;
@@ -26,7 +37,26 @@ export class AuthService {
   private readonly log = logger.child({ component: 'AuthService' });
 
   constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || 'gameondude-dev-secret-change-in-production';
+    const secret = process.env.JWT_SECRET;
+
+    // Security: in production, never run with a missing or placeholder secret —
+    // anyone who reads this source could forge admin/user tokens.
+    if (process.env.NODE_ENV === 'production') {
+      if (!secret || PLACEHOLDER_SECRETS.has(secret)) {
+        throw new Error(
+          'JWT_SECRET must be set to a strong, unique value in production. ' +
+            'Generate one with: openssl rand -base64 48'
+        );
+      }
+      if (secret.length < 32) {
+        this.log.warn(
+          { length: secret.length },
+          'JWT_SECRET is shorter than 32 characters — consider rotating to a longer random value'
+        );
+      }
+    }
+
+    this.jwtSecret = secret || 'gameondude-dev-secret-change-in-production';
     this.jwtExpiry = process.env.JWT_EXPIRY || '7d';
   }
 
@@ -75,10 +105,33 @@ export class AuthService {
 
   /**
    * Authenticate as a guest user.
+   *
+   * Security: the client-supplied guestId is sanitized and always given a
+   * `guest_` prefix so a guest can never claim the userId of a registered
+   * (JWT-authenticated) user. Usernames are stripped of control characters
+   * and length-capped.
    */
   private authenticateAsGuest(username?: string, guestId?: string): AuthResult {
-    const finalGuestId = guestId || `guest_${uuidv4()}`;
-    const finalUsername = username || `Guest_${finalGuestId.slice(-6)}`;
+    let finalGuestId: string;
+    if (guestId) {
+      // Keep only safe identifier characters, cap length, force guest_ prefix
+      const cleaned = guestId.replace(/[^\w.-]/g, '').slice(0, MAX_GUEST_ID_LENGTH);
+      finalGuestId =
+        cleaned && cleaned !== 'guest_'
+          ? cleaned.startsWith('guest_')
+            ? cleaned
+            : `guest_${cleaned}`
+          : `guest_${uuidv4()}`;
+    } else {
+      finalGuestId = `guest_${uuidv4()}`;
+    }
+
+    const cleanedUsername = (username ?? '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001F\u007F]/g, '')
+      .trim()
+      .slice(0, MAX_USERNAME_LENGTH);
+    const finalUsername = cleanedUsername || `Guest_${finalGuestId.slice(-6)}`;
 
     this.log.info({ guestId: finalGuestId, username: finalUsername }, 'Guest authenticated');
 

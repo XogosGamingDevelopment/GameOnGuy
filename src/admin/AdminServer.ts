@@ -5,6 +5,7 @@
  * HTTP API for server administration, monitoring, and management.
  */
 
+import crypto from 'crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -28,6 +29,48 @@ export function startAdminServer(server: GameOnServer, port: number) {
   // Request logging
   app.use((req: Request, res: Response, next: NextFunction) => {
     log.debug({ method: req.method, path: req.path }, 'Admin request');
+    next();
+  });
+
+  // ============================================================================
+  // Security: admin API access control
+  //
+  // - If ADMIN_API_KEY is set: every route except /health requires the
+  //   `x-admin-key` header (timing-safe comparison).
+  // - If it is NOT set and NODE_ENV=production: mutating routes (POST/DELETE)
+  //   are disabled so an accidentally exposed admin port can't kill rooms or
+  //   broadcast to players. Read-only monitoring endpoints stay available.
+  // - In development with no key set: everything stays open (unchanged).
+  // ============================================================================
+  const adminApiKey = process.env.ADMIN_API_KEY;
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!adminApiKey && isProduction) {
+    log.warn(
+      'ADMIN_API_KEY is not set — mutating admin endpoints (POST/DELETE) are disabled in production'
+    );
+  }
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path === '/health') return next();
+
+    if (adminApiKey) {
+      const provided = req.header('x-admin-key') || '';
+      const a = Buffer.from(provided);
+      const b = Buffer.from(adminApiKey);
+      const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+      if (!valid) {
+        return res.status(401).json({ error: 'Invalid or missing x-admin-key header' });
+      }
+      return next();
+    }
+
+    if (isProduction && req.method !== 'GET') {
+      return res.status(403).json({
+        error: 'Mutating admin endpoints are disabled: set ADMIN_API_KEY to enable them',
+      });
+    }
+
     next();
   });
 
