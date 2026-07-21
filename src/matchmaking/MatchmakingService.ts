@@ -25,20 +25,27 @@ interface MatchmakingQueue {
 }
 
 // Per-game-type matchmaking configuration
-interface GameMatchmakingConfig {
+export interface GameMatchmakingConfig {
   timeout: number;           // Matchmaking timeout in ms
-  fillWithBots: boolean;     // Whether to fill with bots on timeout
+  fillWithBots: boolean;     // Whether to fill with bots on timeout (opt-in)
   botDifficulty: number;     // Bot difficulty (0-100)
   minHumanPlayers: number;   // Minimum human players required
 }
 
-// Default game matchmaking configurations
+// Default game matchmaking configurations.
+//
+// NOTE (Phase 14): server-side bot fill is OPT-IN. No game ships with
+// fillWithBots enabled by default — Historical Conquest: The Digital handles
+// bots client-side. Games that want server-side bot opponents must:
+//   1. Implement + register a bot in BotRegistry (see
+//      src/bots/games/historical-conquest/ for the reference implementation)
+//   2. Call matchmaking.configureGameMatchmaking(gameType, { fillWithBots: true, ... })
 const GAME_MATCHMAKING_CONFIGS: Record<string, GameMatchmakingConfig> = {
   'historical_conquest': {
-    timeout: 20000,          // 20 seconds for Historical Conquest
-    fillWithBots: true,
+    timeout: 20000,          // 20 s — HC client expects a fast timeout, then runs its own bot locally
+    fillWithBots: false,     // HC: The Digital does bots client-side (Phase 14)
     botDifficulty: 50,
-    minHumanPlayers: 1,
+    minHumanPlayers: 2,
   },
   'default': {
     timeout: 30000,          // 30 seconds default
@@ -77,11 +84,43 @@ export class MatchmakingService {
     this.getClient = getClient;
   }
 
+  // Runtime overrides set via configureGameMatchmaking() — checked before defaults
+  private readonly matchmakingOverrides = new Map<string, GameMatchmakingConfig>();
+
+  /**
+   * Opt a game type into custom matchmaking behavior — including server-side
+   * bot fill. Call at server startup, after registering the game and its bot:
+   *
+   *   server.matchmaking.configureGameMatchmaking('my_game', {
+   *     fillWithBots: true, timeout: 15000, minHumanPlayers: 1,
+   *   });
+   *
+   * Bot fill additionally requires a bot registered for the game type in
+   * BotRegistry (see src/bots/games/historical-conquest/ for the reference
+   * implementation) and a room class that spawns bots — otherwise timed-out
+   * players simply receive matchmake_timeout.
+   */
+  public configureGameMatchmaking(
+    gameType: string,
+    config: Partial<GameMatchmakingConfig>
+  ): void {
+    const base =
+      this.matchmakingOverrides.get(gameType) ??
+      GAME_MATCHMAKING_CONFIGS[gameType] ??
+      GAME_MATCHMAKING_CONFIGS['default'];
+    this.matchmakingOverrides.set(gameType, { ...base, ...config });
+    this.log.info({ gameType, config: this.matchmakingOverrides.get(gameType) }, 'Matchmaking config set');
+  }
+
   /**
    * Get matchmaking config for a game type
    */
   private getMatchmakingConfig(gameType: string): GameMatchmakingConfig {
-    return GAME_MATCHMAKING_CONFIGS[gameType] || GAME_MATCHMAKING_CONFIGS['default'];
+    return (
+      this.matchmakingOverrides.get(gameType) ||
+      GAME_MATCHMAKING_CONFIGS[gameType] ||
+      GAME_MATCHMAKING_CONFIGS['default']
+    );
   }
 
   /**
@@ -302,7 +341,7 @@ export class MatchmakingService {
         const room = await this.roomManager.createRoom(queue.gameType, {
           gameMode: queue.gameMode,
           isPrivate: false,
-          autoStart: false,
+          autoStart: true, // Auto-start when all players ready
           // Pass flag to indicate this came from matchmaking timeout
           // Room can use this to spawn bot immediately instead of waiting
           fromMatchmakingTimeout: true,
@@ -340,6 +379,16 @@ export class MatchmakingService {
             state: room.getState(),
           },
         });
+
+        // Auto-ready the player since they came from matchmaking
+        // This ensures the game can start once bot is also ready
+        setTimeout(() => {
+          room.setPlayerReady(client.id, true);
+          this.log.info(
+            { roomId: room.id, playerId: client.id },
+            'Player auto-set to ready after matchmaking'
+          );
+        }, 200); // 200ms delay to ensure room_joined is processed first
 
         this.log.info(
           {

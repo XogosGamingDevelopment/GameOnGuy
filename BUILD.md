@@ -1332,20 +1332,105 @@ The contact form uses **Mailtrap** for transactional email delivery.
 - **Still open from this session:** commit the Phase 13 files to git;
   optionally rotate `JWT_SECRET` to a 48+ byte value and/or set
   `ADMIN_API_KEY` (both env-only changes, no code needed).
+  *(Phase 13 was committed as `4975912` and pushed at the start of Phase 14.)*
+
+### July 2026 Session (Phase 14) — Server-side bots made opt-in; HC: The Digital re-integration
+**Model Used:** Claude Fable 5 (claude-fable-5)
+**Date:** July 21, 2026
+
+- **Context:** Historical Conquest is reconnecting as a NEW program —
+  "Historical Conquest: The Digital" — which **runs its own bots client-side**.
+  User directive: remove the old server-side bot feature that was helping HC,
+  but keep it available as an opt-in option for future companies. Game type
+  string stays `historical_conquest` (user decision — the old WebGL client
+  never shipped, so nothing conflicts).
+
+- **Bot feature is now OPT-IN (three switches, all default OFF):**
+  1. **Bot registration** (`src/index.ts`): the
+     `import './bots/games/historical-conquest'` registration was removed.
+     No bots register at startup. The import line + full re-enable recipe is
+     preserved in a comment at that spot.
+  2. **Matchmaking fill** (`src/matchmaking/MatchmakingService.ts`):
+     `historical_conquest` config changed to `fillWithBots: false,
+     minHumanPlayers: 2` (timeout stays 20 s so the HC client gets a fast
+     `matchmake_timeout` and can start its own local bot game). NEW public
+     API `matchmaking.configureGameMatchmaking(gameType, config)` lets a
+     future game opt into bot fill (and custom timeouts/min-players) at
+     startup without editing the defaults table. `GameMatchmakingConfig` is
+     now exported.
+  3. **Room-level spawn** (`src/games/xogos/HistoricalConquestRoom.ts`):
+     new `enableBots?: boolean` option (default **false**) gates the
+     "solo human → spawn bot after 20 s" logic. The spawn code is kept intact
+     as the reference implementation.
+
+- **What still exists (the option for future companies):** the whole bot
+  framework — `src/bots/` (BotRegistry, BotManager, BotClient, BotInterface)
+  and the complete HC bot AI under `src/bots/games/historical-conquest/` as
+  the reference implementation. To enable bots for a game: implement + import
+  a bot registration, call `configureGameMatchmaking(type, { fillWithBots:
+  true, minHumanPlayers: 1 })`, and pass `enableBots: true` in room options
+  if using room-level spawning. The recipe is in the src/index.ts comment.
+
+- **New HC matchmaking behavior on prod:** two humans queue → matched as
+  before. One human queues → `matchmake_timeout` after 20 s (message:
+  "Could not find a match. Please try again.") → HC client starts its own
+  local bot game. No server bot ever joins.
+
+- **Docs updated:**
+  - `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` — HC section rewritten (bots are
+    client-side now), bot-fallback flow marked opt-in, new "Server-side bot
+    opponents (opt-in)" section.
+  - **`website/public/gameon-multiplayer-ai-integration-guide.md` (NEW) —
+    full rewrite of the AI integration guide.** The old
+    `xogos-multiplayer-ai-integration-guide.md` described a FICTIONAL
+    Colyseus-style API (`onCreate`/`JoinOrCreate`/`setState`, an unpublished
+    `xogos-multiplayer` npm package) that never matched this server — an AI
+    assistant fed that doc would generate non-working code. Also fixed: the
+    getting-started page download link pointed at
+    `/gameon-multiplayer-ai-integration-guide.md`, which didn't exist on disk
+    (404) — the file was only ever saved under the old xogos name. The
+    rewritten guide (client-perspective protocol, verified shapes, Unity + JS
+    quickstarts, registration process) now lives at BOTH filenames
+    (identical copies) so old links keep working.
+  - This is the doc external teams read FIRST; `docs/
+    MULTIPLAYER_INTEGRATION_GUIDE.md` remains the full reference.
+
+- **Letter to the HC development team** asking the open integration questions
+  (server role: relay vs simulated, their action list, matchmaking prefs) was
+  drafted for the user to send. The old bot-lessons message vocabulary
+  (`servercount2`/`rc`/`splb`/…) only survives in the retired bot code and
+  historical docs — the new integration should be specified fresh by the HC
+  team's answers.
+
+- **Tests:** 226/226 passing, build clean. (No tests covered the removed
+  bot-spawn path; TypingRace/auth/etc. all unaffected.)
+
+- **Verified locally before deploy:** ran the server on a local port and
+  confirmed solo HC matchmaking → `matchmake_timeout` at ~21 s, no bot.
+
+- **Deployed to production** ✅ Version `hc-bots-opt-in-260721-114103`
+  (env `gameonguy-production`, Ready/Green/Ok). Verified live:
+  - `test-hc-no-bot-production.js` (NEW canonical smoke test) — PASS:
+    `matchmake_timeout` at 20.8 s, no server bot joined.
+  - `test-typing-race-action-key.js` — PASS (regression).
+  - **`test-bot-production.js` is now EXPECTED TO "FAIL"** (it asserts the
+    old bot-spawn behavior). Kept for history and for any future game that
+    re-enables bot fill; do not treat its failure as a prod problem.
 
 ---
 
 ## 🚀 RESUME HERE - CURRENT PROJECT STATE
 
-### Current State (July 21, 2026 — end of Phase 13)
+### Current State (July 21, 2026 — end of Phase 14)
 
 **Server Status:** ✅ DEPLOYED & WORKING
 **Production URL:** `wss://multiplayer.gameonguy.com/ws`
-**Production version:** `sec-hardening-260721-100650` (env `gameonguy-production`, Ready/Green/Ok — Phase 13 security hardening live; all 3 smoke tests verified against it)
-**GitHub `main` HEAD:** `7865a4a` — "Fix typing_race silently dropping game_action (Turbo Type follow-up)" (Phase 13 changes not yet committed)
+**Production version:** `hc-bots-opt-in-260721-114103` (env `gameonguy-production`, Ready/Green/Ok — Phase 13 security hardening + Phase 14 bots-opt-in live)
+**Server-side bots:** OFF for all games (opt-in since Phase 14). Historical Conquest: The Digital runs bots client-side; solo HC matchmaking gets `matchmake_timeout` at ~20 s.
+**GitHub `main` HEAD:** see `git log` — Phase 13 is `4975912`; Phase 14 committed after it
 **Tests:** 226/226 PASSING (`npm test`)
 **Build:** clean (`npm run build`)
-**Rollback label if needed:** `tr-typing-race-payload-shape-260529-fix`
+**Rollback labels:** `sec-hardening-260721-100650` (pre-Phase-14), `tr-typing-race-payload-shape-260529-fix` (pre-Phase-13)
 
 **📄 Document to share with external game developers:** `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` — fully rewritten and source-verified in Phase 13. Keep it in sync whenever the wire protocol changes; it is the public face of the platform.
 
@@ -1421,7 +1506,8 @@ curl https://multiplayer.gameonguy.com/health
 
 | Script | What it does |
 |---|---|
-| `node test-bot-production.js` | Verifies the Historical Conquest matchmaking + bot spawn flow (bot appears at ~20 s timeout). |
+| `node test-hc-no-bot-production.js` | **Phase 14 canonical HC test.** Verifies solo `historical_conquest` matchmaking gets `matchmake_timeout` at ~20 s and NO server bot joins (bots are opt-in and OFF). Supports `GAMEON_URL=ws://localhost:3000/ws` for local runs. |
+| `node test-bot-production.js` | ⚠️ LEGACY — asserts the OLD bot-spawn behavior, so it now "fails" by design. Only useful again if a game re-enables server-side bot fill. |
 | `node test-typing-race-production.js` | Phase 11. Connects two guest clients, creates a `typing_race` room, runs `race_setup` → `progress` → `finish` using the **canonical** `payload.type` shape, asserts `game_end` carries standings. Regression check. |
 | `node test-typing-race-action-key.js` | Phase 12. Same flow but uses **Turbo Type's** `payload.action` wire shape. This is the script that catches the kind of silent-drop bug Phase 12 fixed. Run this against any new typing_race deploy. |
 
@@ -1431,7 +1517,9 @@ If any of these fail after a deploy, you've broken something — roll back via `
 
 ### What's working on production right now
 
-**Historical Conquest bot loop** (Phase 9 — still good):
+**Historical Conquest matchmaking** (Phase 14): pairs two humans; solo players get `matchmake_timeout` at ~20 s and the HC: The Digital client runs its own bot locally. **Server-side bots are OFF** (opt-in framework retained — see Phase 14 entry).
+
+**Historical Conquest bot loop** (Phase 9 — RETIRED in Phase 14; kept below for reference, code preserved in `src/bots/games/historical-conquest/`):
 - Join: `servercount2` → `playerinfo` → `rc`
 - Game start: `startgame` → `rfol` → `lhp` + `ds`
 - Turn: `splb` → `ppch` + `ds` → `pet`
@@ -1913,10 +2001,10 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 
 ---
 
-*Last Updated: July 21, 2026 (Phase 13 — Integration-doc audit + security hardening)*
+*Last Updated: July 21, 2026 (Phase 14 — bots opt-in, HC: The Digital re-integration)*
 *Built for Game On Dude! - www.gameonguy.com*
 *Production Server: wss://multiplayer.gameonguy.com/ws*
-*Production Version: sec-hardening-260721-100650 (Phase 13 hardening live)*
+*Production Version: hc-bots-opt-in-260721-114103 (Phases 13+14 live)*
 *GitHub `main` HEAD: 7865a4a (Phase 13 not yet committed)*
 *226 Unit Tests Passing*
 *7 Games Registered (Lightning Round, Historical Conquest, GeoTag, Typing Race, TimeQuest, Number Munchers, Panic Attack)*

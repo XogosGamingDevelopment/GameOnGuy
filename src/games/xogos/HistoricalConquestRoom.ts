@@ -136,6 +136,14 @@ export interface HistoricalConquestOptions extends TurnBasedRoomOptions {
   cardDatabase?: Card[];
   /** If true, spawn bot immediately (player already waited in matchmaking) */
   fromMatchmakingTimeout?: boolean;
+  /**
+   * Opt-in server-side bot opponents (default: false).
+   * Historical Conquest: The Digital runs its own bots client-side, so this
+   * stays off for HC. The room-level spawn logic below is kept as the
+   * reference implementation for future games that want server-side bots —
+   * see "Server-side bots (opt-in)" in BUILD.md.
+   */
+  enableBots?: boolean;
 }
 
 // ============================================================================
@@ -329,11 +337,12 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
   private readonly victoryCondition: 'elimination' | 'territory' | 'points';
   private readonly victoryPoints: number;
 
-  // Bot spawning
+  // Bot spawning (opt-in — disabled by default since Phase 14)
   private botManager: BotManager;
   private botSpawnTimeout: NodeJS.Timeout | null = null;
   private readonly BOT_TIMEOUT_MS = 20000; // 20 seconds
   private readonly spawnBotImmediately: boolean; // If player came from matchmaking timeout
+  private readonly botsEnabled: boolean; // Server-side bots must be explicitly enabled
 
   declare protected state: HistoricalConquestState;
 
@@ -344,6 +353,7 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
       actionsPerTurn: options.actionsPerTurn ?? 10, // Multiple actions per turn
       allowUndo: true,
       setupPhaseTime: options.setupPhaseTime ?? 30000, // 30 seconds setup
+      autoStart: options.autoStart ?? true, // Auto-start when all players ready
     });
 
     this.startingHandSize = options.startingHandSize ?? 5;
@@ -359,11 +369,19 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
     // If player came from matchmaking timeout, spawn bot immediately
     this.spawnBotImmediately = options.fromMatchmakingTimeout ?? false;
 
+    // Server-side bots are opt-in (Phase 14): Historical Conquest: The Digital
+    // handles bots client-side, so bots stay off unless explicitly enabled.
+    this.botsEnabled = options.enableBots ?? false;
+
     // Initialize bot manager for room-level bot spawning
     this.botManager = new BotManager(this as any);
     hcLog.info(
-      { roomId: this.id, spawnBotImmediately: this.spawnBotImmediately },
-      'HistoricalConquestRoom created with bot support'
+      {
+        roomId: this.id,
+        botsEnabled: this.botsEnabled,
+        spawnBotImmediately: this.spawnBotImmediately,
+      },
+      'HistoricalConquestRoom created'
     );
   }
 
@@ -431,8 +449,8 @@ export class HistoricalConquestRoom extends TurnBasedRoom {
       militaryPerTurn: 1,
     };
 
-    // Room-level bot spawning logic
-    if (playerCount === 1 && !isBot) {
+    // Room-level bot spawning logic (opt-in — see enableBots option)
+    if (this.botsEnabled && playerCount === 1 && !isBot) {
       // First human player joined - spawn bot (immediately or after timeout)
       const timeoutMs = this.spawnBotImmediately ? 100 : this.BOT_TIMEOUT_MS;
 

@@ -33,8 +33,15 @@ import { GameOnGames } from './games';
 import logger from './core/Logger';
 import { startAdminServer } from './admin/AdminServer';
 
-// Bot registrations - import to register bots
-import './bots/games/historical-conquest';
+// Server-side bots are OPT-IN (Phase 14). No bots are registered by default —
+// Historical Conquest: The Digital runs its own bots client-side.
+// To enable server-side bots for a future game:
+//   1. Implement a bot (reference: src/bots/games/historical-conquest/)
+//   2. Import its registration module here, e.g.:
+//        import './bots/games/historical-conquest';
+//   3. Opt the game into bot fill after server creation:
+//        server.matchmaking.configureGameMatchmaking('game_type', { fillWithBots: true, minHumanPlayers: 1 });
+//   4. Pass enableBots: true in the game's room options if it uses room-level spawning
 
 // Database and Cache
 import { DatabaseService, getDatabaseService } from './database';

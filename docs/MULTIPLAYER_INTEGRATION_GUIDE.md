@@ -301,9 +301,9 @@ Then one of three outcomes:
 ```
 → your client sends `{ "type": "room_join", "payload": { "roomId": "..." } }`
 
-**B. Timeout with bot fallback** (~20 seconds, for games with bots — currently Historical Conquest): the server **auto-joins you** into a room — you receive `room_joined` directly (no `room_join` needed), you are auto-readied, a bot joins (`player_joined`), the bot readies, and the game starts. Handle `room_joined` arriving without having sent `room_join`.
+**B. Timeout with bot fallback** (opt-in per game — no game currently has server-side bots enabled; ask us to enable it for yours): the server **auto-joins you** into a room — you receive `room_joined` directly (no `room_join` needed), you are auto-readied, a server bot joins (`player_joined`), the bot readies, and the game starts. Clients of opted-in games must handle `room_joined` arriving without having sent `room_join`.
 
-**C. Timeout without bots:**
+**C. Timeout without bots (the default):**
 
 ```json
 { "type": "matchmake_timeout", "payload": { "gameType": "...", "message": "Could not find a match. Please try again." } }
@@ -411,7 +411,7 @@ Games may define additional message types (see below). Unknown message types sho
 | `time_quest` | Trivia | 2–4 | Chronological ordering (base trivia rules for now) |
 | `number_munchers` | Real-time | 1–4 | Math grid movement (base movement rules for now) |
 | `panic_attack` | Real-time | 4–15 | Social deduction (base movement rules for now) |
-| `historical_conquest` | Turn-based | 2–4 | Card battle game with full bot AI opponent support |
+| `historical_conquest` | Turn-based | 2–4 | Card battle game (Historical Conquest: The Digital — bots run client-side) |
 | `geotag` | Real-time | 2–8 | Geography chase game (hunt art thieves across the globe) |
 | `typing_race` | Relay | 2–8 | Typing race relay (Turbo Type) — see below |
 
@@ -427,9 +427,13 @@ A lightweight relay: the server does not simulate the race, it validates, relays
 
 Broadcasts: every action triggers `state_update { state: { status, text, startAt, players: [...] } }`. When all players finish (or 15 s after the first finisher), `game_end { results: { standings: [...] } }`. Unknown action names get a real `error` reply.
 
-### `historical_conquest` — custom protocol + bots
+### `historical_conquest` — Historical Conquest: The Digital
 
-Historical Conquest uses its own in-room message vocabulary (relayed via room messages) and has full bot AI: matchmake, and if no human appears in ~20 s a bot ("Rowan", "Parker", …) joins and plays a complete game. Integrators for this title should request the dedicated HC message-flow document ("Bot Lessons") — the generic `game_action` flow above does not cover it.
+Matchmaking pairs two human players; on a ~20 s timeout the client receives `matchmake_timeout` and should start its own local bot game (HC: The Digital runs bots client-side). Server-side bots for HC were retired in July 2026 — the bot framework remains available as an opt-in for other games (see below).
+
+### Server-side bot opponents (opt-in for any game)
+
+The platform can spawn an AI opponent into a room when no human match is found — the bot joins as a normal player (`player_joined`), readies up, and plays your game. This requires the Game On Dude! team to implement a bot for your game's rules (a full reference implementation exists). If you'd rather keep control, handle `matchmake_timeout` in your client and run bots locally. Request bot support via the contact flow below.
 
 ### `lightning_round` — trivia actions
 
