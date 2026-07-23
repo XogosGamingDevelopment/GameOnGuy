@@ -1420,20 +1420,104 @@ The contact form uses **Mailtrap** for transactional email delivery.
     old bot-spawn behavior). Kept for history and for any future game that
     re-enables bot fill; do not treat its failure as a prod problem.
 
+### July 2026 Session (Phase 15) — Outage postmortem + fix; historical_conquest converted to RELAY room
+**Model Used:** Claude Fable 5 (claude-fable-5)
+**Date:** July 23, 2026
+
+- **Trigger:** Letter from Historical Conquest (via the user): (1) prod backend
+  returning 504 continuously since July 21; (2) request to register
+  `historical_conquest` as a relay room (lockstep client, min 2 / max 4,
+  no bots, no turn gating, private room codes via room_list).
+
+- **🔥 OUTAGE ROOT CAUSE (found via EB events + instance logs):**
+  - Timeline: Phase 14 deploy at 16:41 UTC July 21 was healthy. At 21:05 UTC
+    two clients started an HC game (old simulated TurnBasedRoom, 30 s setup
+    phase). At 21:06:03 both disconnected during setup; the game ended via the
+    win-condition/min-players checks — but the pending **setup-phase
+    `setTimeout` was never cancelled**. At ~21:06:14 it fired:
+    `beginGame()` → `startTurn()` → the "skip eliminated players" `while`
+    loop (`TurnBasedRoom.startTurn`) had NO un-eliminated player to land on
+    (`maxRounds=0` so the escape never triggers) → **infinite loop pinning one
+    core and blocking the event loop**. ALB health checks and all requests
+    504'd from then on; instance showed CPU ~50 % user / load 1.0, app logged
+    nothing further, room never disposed. ELB flagged Severe at 21:10 UTC.
+  - Immediate mitigation (July 23 ~16:45 UTC): `aws elasticbeanstalk
+    restart-app-server` → health Green, service restored while the fix was
+    prepared.
+
+- **Fix in `src/games/TurnBasedRoom.ts`:**
+  1. Setup-phase and between-turns `setTimeout`s are now stored
+     (`setupTimer` / `betweenTurnsTimer`) and cleared in `onGameEnd()` and in
+     a new `dispose()` override (turn timer already was).
+  2. `beginGame()` / `startTurn()` / the between-turns callback now guard on
+     `isGameActive()` (IN_PROGRESS **or** STARTING — Room.startGame calls
+     onGameStart while still STARTING).
+  3. `startTurn()` ends the game cleanly if `getActivePlayers().length === 0`
+     instead of scanning the turn order forever.
+  - **Regression tests** `tests/games/TurnBasedRoomHang.test.ts` (3 tests):
+    all-leave-during-setup, all-leave-during-between-turns-pause, healthy
+    turn rotation. **Verified they HANG on the pre-fix code** (checked out
+    HEAD's TurnBasedRoom, test wedged exactly like prod, restored fix).
+
+- **`historical_conquest` is now a RELAY room:**
+  - New `src/games/xogos/HistoricalConquestRelayRoom.ts` — pure relay for
+    the lockstep "HC: The Digital" client. Every `game_action` from a player
+    is relayed to the OTHER players immediately (no game start required, no
+    setup phase, no turn order, no validation, nothing rejected). Overrides
+    `handleGameAction()` to bypass the base IN_PROGRESS gate (TypingRaceRoom
+    pattern). **Shape-agnostic** (Phase 12 lesson): action name read from
+    `payload.type` OR `payload.action` or absent; `data = payload.data ??
+    <entire payload verbatim>`. Relayed message: `game_action` with payload
+    `{ type, action (alias), playerId, username, data, timestamp, sequence }`.
+    Sender does NOT get its own action back by default (`echoToSender: true`
+    room option enables echo). Min 2 / max 4 defaults.
+  - Registered in `src/index.ts` for `GameOnGames.HISTORICAL_CONQUEST.type`
+    (replacing the simulated `HistoricalConquestRoom`, which stays in the
+    codebase unregistered as reference). Exported via `src/games/xogos/index.ts`.
+  - Matchmaking config unchanged (2 humans / 20 s timeout) — HC doesn't need
+    it (private room codes via room_list) but it still works.
+  - **Note:** HC's letter referenced an "attached spec" with their exact
+    message shapes — it never arrived. The relay is shape-agnostic so it
+    carries anything; the response letter asks them to resend the spec so a
+    verification script in THEIR exact shapes can be added.
+
+- **Tests:** 239/239 passing (was 226; +10 relay room, +3 hang regression).
+  Build clean.
+
+- **New canonical smoke test `test-hc-relay-production.js`:** two guests →
+  room_create → room_list discovery → room_join → relays all three payload
+  shapes to peers (asserts sender playerId, verbatim data, no self-echo,
+  zero action_rejected/error, no setup_phase, no turn_start) → both
+  disconnect → probe client confirms server still responsive (outage
+  regression). Supports `GAMEON_URL=ws://localhost:PORT/ws`.
+
+- **Deployed to production** ✅ Version `hc-relay-outage-fix-260723-121049`
+  (env `gameonguy-production`, Ready/Green/Ok). Same create-zip + AWS CLI
+  path. **Verified live:** `test-hc-relay-production.js` PASS,
+  `test-typing-race-action-key.js` PASS, `test-typing-race-production.js`
+  PASS, `/health` ok.
+
+- **Docs:** `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` HC section rewritten
+  (relay contract, relayed-message shape, room-code flow, echoToSender).
+  Response letter: `docs/conversation/RESPONSE_HC_RELAY_AND_OUTAGE_FIX.md`
+  (owns the outage with full root cause, documents the relay contract, asks
+  for the missing spec).
+
 ---
 
 ## 🚀 RESUME HERE - CURRENT PROJECT STATE
 
-### Current State (July 21, 2026 — end of Phase 14)
+### Current State (July 23, 2026 — end of Phase 15)
 
-**Server Status:** ✅ DEPLOYED & WORKING
+**Server Status:** ✅ DEPLOYED & WORKING (outage of July 21–23 root-caused and fixed in Phase 15)
 **Production URL:** `wss://multiplayer.gameonguy.com/ws`
-**Production version:** `hc-bots-opt-in-260721-114103` (env `gameonguy-production`, Ready/Green/Ok — Phase 13 security hardening + Phase 14 bots-opt-in live)
-**Server-side bots:** OFF for all games (opt-in since Phase 14). Historical Conquest: The Digital runs bots client-side; solo HC matchmaking gets `matchmake_timeout` at ~20 s.
-**GitHub `main` HEAD:** `db5f02e` — "Phase 14: server-side bots now opt-in; HC: The Digital re-integration" (Phase 13 = `4975912`, both pushed to origin/main)
-**Tests:** 226/226 PASSING (`npm test`)
+**Production version:** `hc-relay-outage-fix-260723-121049` (env `gameonguy-production`, Ready/Green/Ok — TurnBasedRoom hang fix + historical_conquest relay room live)
+**historical_conquest:** RELAY room since Phase 15 (lockstep client; pure relay, no turn gating, min 2/max 4, no bots). Old simulated `HistoricalConquestRoom` unregistered but kept as reference.
+**Server-side bots:** OFF for all games (opt-in since Phase 14).
+**GitHub `main` HEAD:** Phase 15 commit — "Phase 15: fix TurnBasedRoom hang (July 21 outage) + historical_conquest relay room" (Phase 14 = `db5f02e`, Phase 13 = `4975912`)
+**Tests:** 239/239 PASSING (`npm test`)
 **Build:** clean (`npm run build`)
-**Rollback labels:** `sec-hardening-260721-100650` (pre-Phase-14), `tr-typing-race-payload-shape-260529-fix` (pre-Phase-13)
+**Rollback labels:** `hc-bots-opt-in-260721-114103` (pre-Phase-15 — ⚠️ contains the TurnBasedRoom infinite-loop bug that caused the July 21 outage; only roll back to it in an emergency and expect HC games to be able to wedge the server), `sec-hardening-260721-100650` (pre-Phase-14)
 
 **📄 Document to share with external game developers:** `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` — fully rewritten and source-verified in Phase 13. Keep it in sync whenever the wire protocol changes; it is the public face of the platform.
 
@@ -1509,7 +1593,8 @@ curl https://multiplayer.gameonguy.com/health
 
 | Script | What it does |
 |---|---|
-| `node test-hc-no-bot-production.js` | **Phase 14 canonical HC test.** Verifies solo `historical_conquest` matchmaking gets `matchmake_timeout` at ~20 s and NO server bot joins (bots are opt-in and OFF). Supports `GAMEON_URL=ws://localhost:3000/ws` for local runs. |
+| `node test-hc-relay-production.js` | **Phase 15 canonical HC test.** Two guests: room_create → room_list → room_join, relays all 3 payload shapes to peers (no turn gating, no setup_phase, no self-echo, zero rejections), then both disconnect and a probe confirms the server is still responsive (July-21 outage regression). Supports `GAMEON_URL=ws://localhost:3000/ws`. |
+| `node test-hc-no-bot-production.js` | Phase 14. Verifies solo `historical_conquest` matchmaking gets `matchmake_timeout` at ~20 s and NO server bot joins (bots are opt-in and OFF). Supports `GAMEON_URL=ws://localhost:3000/ws` for local runs. |
 | `node test-bot-production.js` | ⚠️ LEGACY — asserts the OLD bot-spawn behavior, so it now "fails" by design. Only useful again if a game re-enables server-side bot fill. |
 | `node test-typing-race-production.js` | Phase 11. Connects two guest clients, creates a `typing_race` room, runs `race_setup` → `progress` → `finish` using the **canonical** `payload.type` shape, asserts `game_end` carries standings. Regression check. |
 | `node test-typing-race-action-key.js` | Phase 12. Same flow but uses **Turbo Type's** `payload.action` wire shape. This is the script that catches the kind of silent-drop bug Phase 12 fixed. Run this against any new typing_race deploy. |
@@ -1520,7 +1605,9 @@ If any of these fail after a deploy, you've broken something — roll back via `
 
 ### What's working on production right now
 
-**Historical Conquest matchmaking** (Phase 14): pairs two humans; solo players get `matchmake_timeout` at ~20 s and the HC: The Digital client runs its own bot locally. **Server-side bots are OFF** (opt-in framework retained — see Phase 14 entry).
+**Historical Conquest RELAY room** (Phase 15): `room_create`/`room_list`/`room_join` with private codes; every `game_action` relayed immediately to the other players (shape-agnostic: `payload.type`, `payload.action`, or flat; data verbatim); no setup phase, no turn order, no self-echo (opt-in via `echoToSender`); min 2 / max 4.
+
+**Historical Conquest matchmaking** (Phase 14, optional for HC): pairs two humans; solo players get `matchmake_timeout` at ~20 s and the HC: The Digital client runs its own bot locally. **Server-side bots are OFF** (opt-in framework retained — see Phase 14 entry).
 
 **Historical Conquest bot loop** (Phase 9 — RETIRED in Phase 14; kept below for reference, code preserved in `src/bots/games/historical-conquest/`):
 - Join: `servercount2` → `playerinfo` → `rc`
@@ -1546,20 +1633,16 @@ If any of these fail after a deploy, you've broken something — roll back via `
 
 ---
 
-### 🏛️ Historical Conquest status: OLD integration retired, NEW one awaiting HC team's answers (Phase 14)
+### 🏛️ Historical Conquest status: RELAY room LIVE (Phase 15); awaiting their spec re-send for exact-shape verification
 
-**The old "Unity WebGL rebuild" blocker is OBSOLETE.** That plan (Phases 6–10: our SDK dropped into their old Unity project, server-side bots, WebGL rebuild that never happened) is superseded. Historical Conquest is reconnecting as a **new program — "Historical Conquest: The Digital"** — that runs its own bots client-side.
+**HC answered (partially) via their July 23 letter:** relay room, min 2 / max 4, no server bots, no matchmaking (private room codes via room_list), lockstep client. That is now **live in production** — `historical_conquest` maps to `HistoricalConquestRelayRoom` (pure relay, shape-agnostic, no turn gating). Verified by `test-hc-relay-production.js`.
 
-**Where the new integration stands (July 21, 2026):**
-- Server side is READY: `historical_conquest` game type is registered; matchmaking pairs 2 humans; solo players get `matchmake_timeout` at ~20 s (their client then starts a local bot game). Verified live by `test-hc-no-bot-production.js`.
-- Server-side bots for HC are OFF (opt-in framework retained — see Phase 14 entry).
-- **⏳ WAITING ON: the HC team's answers to the 6-question integration letter** the user sent them (drafted in the Phase 14 session). The questions: (1) relay vs simulated room, (2) their exact action JSON — copied, not paraphrased, (3) matchmaking prefs (players/timeout/ranked), (4) build targets (WebGL/standalone/mobile), (5) mid-game disconnect policy, (6) extras (persistence, private rooms, rematch). They were also given `website/public/gameon-multiplayer-ai-integration-guide.md` to read first.
+**⏳ Still open:** their letter referenced an **attached spec with their exact message shapes that never arrived.** The response letter (`docs/conversation/RESPONSE_HC_RELAY_AND_OUTAGE_FIX.md`) asks them to resend it. When it arrives:
+1. Check the relayed-message shape (`game_action` payload `{ type, action, playerId, username, data, timestamp }`, no self-echo by default) against what their client actually expects to RECEIVE — that's the one contract the shape-agnostic relay had to invent. `echoToSender: true` room option exists if they need the echo.
+2. Extend `test-hc-relay-production.js` (or add a sibling) speaking **their exact wire shapes** end-to-end before confirming (Phase 12 lesson).
+3. Adjust matchmaking via `configureGameMatchmaking('historical_conquest', {...})` only if they ask.
 
-**When their answers arrive, the next developer should:**
-1. If they choose **relay** (recommended & likely): model the room on `src/games/xogos/TypingRaceRoom.ts` — override `handleGameAction()` to bypass the `IN_PROGRESS` gate, accept their exact action key shapes, broadcast `state_update`, declare results. If **simulated**: adapt the existing `HistoricalConquestRoom` logic to their rules.
-2. Write a verification script that speaks **their exact wire shapes** (the Phase 12 lesson — `test-typing-race-action-key.js` is the template) BEFORE telling them it works.
-3. Configure matchmaking per their answers via `matchmaking.configureGameMatchmaking('historical_conquest', {...})` if defaults (2 players, 20 s) don't fit.
-4. Deploy via the create-zip flow, run smoke tests, send them the confirmation + any client-facing notes.
+The old simulated `HistoricalConquestRoom` (turn order, combat, resources) is still in the codebase, unregistered, as a reference implementation. The Phases 6–10 Unity-WebGL/server-bot plan remains obsolete.
 
 ---
 
@@ -1600,18 +1683,19 @@ Before touching anything that ships to prod, re-read "⚠️ READ THIS BEFORE YO
 #### 1. Verify the server is healthy before doing anything
 ```bash
 npm install                              # if first time
-npm test                                 # expect 226 passing
+npm test                                 # expect 239 passing
 npm run build                            # expect clean tsc
 curl https://multiplayer.gameonguy.com/health      # expect {"status":"ok",...}
+node test-hc-relay-production.js         # HC relay: all shapes relay, no gating, outage regression
 node test-typing-race-action-key.js      # Turbo Type wire shape (the one prod cared about)
 node test-typing-race-production.js      # canonical typing_race shape (regression)
-node test-hc-no-bot-production.js        # HC: matchmake_timeout ~20s, NO bot (~25s wait)
+node test-hc-no-bot-production.js        # HC matchmaking: matchmake_timeout ~20s, NO bot (~25s wait)
 ```
 If any of these are red, fix that before adding scope. (Do NOT run `test-bot-production.js` expecting success — it asserts the retired bot behavior and fails by design since Phase 14.)
 
 #### 2. Outstanding work, in rough priority order
 
-- **🔴 Historical Conquest: The Digital integration — waiting on the HC team's answers.** The 6-question letter went out at the end of Phase 14. When answers arrive, follow the step-by-step plan in the "🏛️ Historical Conquest status" section above (relay room modeled on TypingRaceRoom is the likely shape; verification script in THEIR wire shapes before declaring success).
+- **🟡 HC: The Digital — get their spec re-sent** and verify the relay against their exact wire shapes (see "🏛️ Historical Conquest status" above). The relay itself is live and verified shape-agnostically.
 - **🟡 Optional prod env hardening:** rotate `JWT_SECRET` to a 48+ byte random value (`openssl rand -base64 48`; only guests use auth today, so rotation is free); set `ADMIN_API_KEY` if remote admin API access is ever needed. (The leftover `YOUR_ENDPOINT`/`YOUR_PASSWORD` vars were removed in Phase 13.)
 - **🟡 Long-standing uncommitted WIP cleanup — SHRUNK in Phases 13–14.** Now committed: BUILD.md, AuthService, Server.ts, AdminServer, MatchmakingService, HistoricalConquestRoom, both integration guides. Still uncommitted vs HEAD: `src/bots/` (months-old bot changes), `src/database/` repositories, `db/init.sql`, `package.json`/lock, `.ebextensions/03-https.config`, and the website tree (including the Phase 7 auth system). This code has been running on prod for months. When you have a low-risk window, walk the diff file-by-file and commit in logical chunks so git stops lying about reality.
 - **🟢 Short room code (Turbo Type nice-to-have).** Rooms still return UUIDs in `payload.id`. Turbo Type tolerates UUIDs and didn't block on this. Implement as a non-breaking addition — extra field, UUID still valid — so existing games keep working. Don't replace the UUID; the room manager looks rooms up by it.
@@ -1922,7 +2006,7 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 | Game | Type | Status |
 |------|------|--------|
 | Lightning Round | Trivia | ✅ Complete |
-| Historical Conquest | Turn-Based | 🔄 Re-integrating as "HC: The Digital" (server-side bots retired Phase 14; awaiting HC team's spec) |
+| Historical Conquest | Relay ("HC: The Digital") | ✅ Live on prod as pure relay (Phase 15); awaiting HC spec re-send for exact-shape verification |
 | GeoTag | Geography Chase | ✅ Complete |
 | Typing Race | Relay (Turbo Type) | ✅ Live on prod |
 | TimeQuest | Trivia | ❌ Not started |
@@ -1977,21 +2061,22 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 
 ---
 
-*Last Updated: July 21, 2026 (Phase 14 — bots opt-in, HC: The Digital re-integration)*
+*Last Updated: July 23, 2026 (Phase 15 — outage fix + historical_conquest relay room)*
 *Built for Game On Dude! - www.gameonguy.com*
 *Production Server: wss://multiplayer.gameonguy.com/ws*
-*Production Version: hc-bots-opt-in-260721-114103 (Phases 13+14 live)*
-*GitHub `main` HEAD: db5f02e — "Phase 14: server-side bots now opt-in; HC: The Digital re-integration" (Phase 13 = 4975912)*
-*226 Unit Tests Passing*
-*7 Games Registered (Lightning Round, Historical Conquest, GeoTag, Typing Race, TimeQuest, Number Munchers, Panic Attack)*
+*Production Version: hc-relay-outage-fix-260723-121049 (Phases 13+14+15 live)*
+*GitHub `main` HEAD: Phase 15 commit (Phase 14 = db5f02e, Phase 13 = 4975912)*
+*239 Unit Tests Passing*
+*7 Games Registered (Lightning Round, Historical Conquest [relay], GeoTag, Typing Race, TimeQuest, Number Munchers, Panic Attack)*
 *Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md (AI-assistant version: website/public/gameon-multiplayer-ai-integration-guide.md)*
 *24+ Website Routes*
 *Developed with Claude Opus 4.8 / Claude Fable 5*
 
-**Current Status:** ✅ Server is DEPLOYED and WORKING (Phases 13+14 live as `hc-bots-opt-in-260721-114103`).
+**Current Status:** ✅ Server is DEPLOYED and WORKING (Phases 13+14+15 live as `hc-relay-outage-fix-260723-121049`).
+- ✅ **Phase 15 outage fix live:** the July 21–23 outage (TurnBasedRoom setup-timer → infinite eliminated-player loop → event loop blocked → continuous 504s) is root-caused, fixed, and regression-tested. Timers cancelled on game end/dispose; startTurn ends the game when no active players remain.
+- ✅ **historical_conquest is a RELAY room** (Phase 15): pure relay for the lockstep HC: The Digital client — no turn gating, no setup phase, min 2 / max 4, no bots, private room codes via room_list. Verified by `test-hc-relay-production.js`. ⏳ HC's exact-shapes spec never arrived — response letter asks for a re-send.
 - ✅ Phase 13 security hardening live: JWT fail-fast, guest_ ID namespacing, 1 MiB message cap, admin API gate. Prod env cleaned (junk vars removed).
 - ✅ Server-side bots OFF for all games (opt-in since Phase 14; framework + HC reference bot preserved).
 - ✅ Typing Race relay (`gameType: "typing_race"`) — live since Phase 11, hardened in Phase 12. Verified end-to-end after every deploy by `test-typing-race-action-key.js`.
-- ⏳ **Historical Conquest: The Digital — waiting on the HC team's answers to the Phase 14 integration letter.** Server side is ready (matchmaking pairs humans; solo → `matchmake_timeout` ~20 s; verified by `test-hc-no-bot-production.js`). The old WebGL-rebuild blocker is obsolete.
 
 **Deploy reminder:** use `node create-zip.js` + the AWS CLI sequence in the RESUME HERE block. **`eb deploy` is broken for this repo** (ships git HEAD which is intentionally behind reality).

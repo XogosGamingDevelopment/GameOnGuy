@@ -26,7 +26,7 @@ import { TriviaRoom } from './games/TriviaRoom';
 import { RealTimeMovementRoom } from './games/RealTimeMovementRoom';
 import { TurnBasedRoom } from './games/TurnBasedRoom';
 import { LightningRoundRoom } from './games/xogos/LightningRoundRoom';
-import { HistoricalConquestRoom } from './games/xogos/HistoricalConquestRoom';
+import { HistoricalConquestRelayRoom } from './games/xogos/HistoricalConquestRelayRoom';
 import { GeoTagRoom } from './games/xogos/GeoTagRoom';
 import { TypingRaceRoom } from './games/xogos/TypingRaceRoom';
 import { GameOnGames } from './games';
@@ -242,10 +242,14 @@ function registerGames(server: GameOnServer) {
     GameOnGames.PANIC_ATTACK
   );
 
-  // Register Turn-Based Games
+  // Historical Conquest: The Digital — RELAY room (July 2026, per Xogos
+  // Gaming's request). The client is lockstep (full game logic on every
+  // device); the server relays actions with no turn order, no setup phase,
+  // and no server-side bots. The old simulated-turn implementation
+  // (HistoricalConquestRoom) is retained in src/games/xogos/ for reference.
   server.roomManager.registerGame(
     GameOnGames.HISTORICAL_CONQUEST.type,
-    HistoricalConquestRoom,
+    HistoricalConquestRelayRoom,
     GameOnGames.HISTORICAL_CONQUEST
   );
 
@@ -458,6 +462,8 @@ export {
   HistoricalConquestRoom,
   HistoricalConquestState,
   HistoricalConquestOptions,
+  HistoricalConquestRelayRoom,
+  HistoricalConquestRelayRoomOptions,
   Card,
   CardStats,
   Ability,

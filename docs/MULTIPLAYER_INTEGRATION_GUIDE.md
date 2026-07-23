@@ -411,7 +411,7 @@ Games may define additional message types (see below). Unknown message types sho
 | `time_quest` | Trivia | 2–4 | Chronological ordering (base trivia rules for now) |
 | `number_munchers` | Real-time | 1–4 | Math grid movement (base movement rules for now) |
 | `panic_attack` | Real-time | 4–15 | Social deduction (base movement rules for now) |
-| `historical_conquest` | Turn-based | 2–4 | Card battle game (Historical Conquest: The Digital — bots run client-side) |
+| `historical_conquest` | Relay | 2–4 | Card battle game (Historical Conquest: The Digital, lockstep client) — see below |
 | `geotag` | Real-time | 2–8 | Geography chase game (hunt art thieves across the globe) |
 | `typing_race` | Relay | 2–8 | Typing race relay (Turbo Type) — see below |
 
@@ -427,9 +427,33 @@ A lightweight relay: the server does not simulate the race, it validates, relays
 
 Broadcasts: every action triggers `state_update { state: { status, text, startAt, players: [...] } }`. When all players finish (or 15 s after the first finisher), `game_end { results: { standings: [...] } }`. Unknown action names get a real `error` reply.
 
-### `historical_conquest` — Historical Conquest: The Digital
+### `historical_conquest` — Historical Conquest: The Digital (pure relay)
 
-Matchmaking pairs two human players; on a ~20 s timeout the client receives `matchmake_timeout` and should start its own local bot game (HC: The Digital runs bots client-side). Server-side bots for HC were retired in July 2026 — the bot framework remains available as an opt-in for other games (see below).
+Since July 2026, `historical_conquest` is a **pure relay room**. The HC client is lockstep — every device runs the full game logic — so the server does **no** simulation, **no** turn order, **no** setup phase, and **no** action validation. Min 2 / max 4 players; no server-side bots.
+
+**Every `game_action` a player sends is forwarded to the other players in the room immediately**, as soon as players are present (no `game_start` required, nothing is ever rejected with "Not your turn"). The action name may be in `payload.type` or `payload.action`, or absent entirely — the payload relays regardless.
+
+What the *other* players receive:
+
+```json
+{
+  "type": "game_action",
+  "payload": {
+    "type": "<action name or null>",
+    "action": "<same value — alias>",
+    "playerId": "<sender connection id>",
+    "username": "<sender display name>",
+    "data": "<payload.data if nested, otherwise the whole payload as sent>",
+    "timestamp": 1784800000000
+  }
+}
+```
+
+By default the sender does **not** receive its own action back (lockstep clients apply locally before sending; set `echoToSender: true` in `room_create` options if you want the echo).
+
+**Room flow (private room codes, no matchmaking needed):** the host sends `room_create { gameType: "historical_conquest" }` and shares the returned `payload.id`; friends find it via `room_list { gameType: "historical_conquest" }` (or join the shared id directly) and send `room_join { roomId }`. The roster comes from `room_joined` / `player_joined` / `player_left`.
+
+Matchmaking still works if you want it (pairs 2 humans, `matchmake_timeout` after ~20 s), but it is not required. Server-side bots for HC were retired in July 2026 — the bot framework remains available as an opt-in for other games (see below).
 
 ### Server-side bot opponents (opt-in for any game)
 

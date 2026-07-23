@@ -7,7 +7,7 @@
  */
 
 import { Room, RoomConstructorOptions } from '../rooms/Room';
-import { PlayerState, GameAction, MessageType } from '../core/types';
+import { PlayerState, GameAction, MessageType, RoomState } from '../core/types';
 import { Client } from '../core/Client';
 
 // ============================================================================
@@ -74,6 +74,8 @@ export class TurnBasedRoom extends Room<TurnBasedState> {
   protected setupPhaseTime: number;
 
   private turnTimer?: NodeJS.Timeout;
+  private setupTimer?: NodeJS.Timeout;
+  private betweenTurnsTimer?: NodeJS.Timeout;
   private actionsThisTurn: number = 0;
 
   constructor(gameType: string, options: TurnBasedRoomOptions = {}) {
@@ -147,7 +149,14 @@ export class TurnBasedRoom extends Room<TurnBasedState> {
   }
 
   protected onGameEnd(): unknown {
+    // Cancel EVERY pending timer. A setup-phase or between-turns timeout that
+    // fires after the game has ended would call beginGame()/startTurn() on a
+    // room whose players may all be gone — the eliminated-player skip loop in
+    // startTurn() then spins forever and blocks the event loop (this took
+    // production down on 2026-07-21).
     this.clearTurnTimer();
+    this.clearSetupTimer();
+    this.clearBetweenTurnsTimer();
 
     return {
       winner: this.determineWinner(),
@@ -221,12 +230,18 @@ export class TurnBasedRoom extends Room<TurnBasedState> {
       payload: { duration: this.setupPhaseTime },
     });
 
-    setTimeout(() => {
+    this.clearSetupTimer();
+    this.setupTimer = setTimeout(() => {
+      this.setupTimer = undefined;
       this.beginGame();
     }, this.setupPhaseTime);
   }
 
   private beginGame(): void {
+    // The game may have ended while the setup timer was pending (e.g. all
+    // players left during the setup phase).
+    if (!this.isGameActive()) return;
+
     this.state.phase = 'playing';
     this.state.roundNumber = 1;
     this.state.currentTurnIndex = 0;
@@ -245,7 +260,16 @@ export class TurnBasedRoom extends Room<TurnBasedState> {
   }
 
   private startTurn(): void {
-    // Skip eliminated players
+    if (!this.isGameActive()) return;
+
+    // If nobody is left un-eliminated there is no turn to start — end the
+    // game instead of scanning the turn order forever.
+    if (this.getActivePlayers().length === 0) {
+      this.endGame();
+      return;
+    }
+
+    // Skip eliminated players (bounded: an active player exists above)
     while (this.isCurrentPlayerEliminated()) {
       this.state.currentTurnIndex = (this.state.currentTurnIndex + 1) % this.state.turnOrder.length;
 
@@ -342,7 +366,10 @@ export class TurnBasedRoom extends Room<TurnBasedState> {
     this.state.phase = 'between_turns';
 
     // Brief pause between turns
-    setTimeout(() => {
+    this.clearBetweenTurnsTimer();
+    this.betweenTurnsTimer = setTimeout(() => {
+      this.betweenTurnsTimer = undefined;
+      if (!this.isGameActive()) return;
       this.state.phase = 'playing';
       this.startTurn();
     }, 1000);
@@ -473,6 +500,39 @@ export class TurnBasedRoom extends Room<TurnBasedState> {
       clearTimeout(this.turnTimer);
       this.turnTimer = undefined;
     }
+  }
+
+  private clearSetupTimer(): void {
+    if (this.setupTimer) {
+      clearTimeout(this.setupTimer);
+      this.setupTimer = undefined;
+    }
+  }
+
+  private clearBetweenTurnsTimer(): void {
+    if (this.betweenTurnsTimer) {
+      clearTimeout(this.betweenTurnsTimer);
+      this.betweenTurnsTimer = undefined;
+    }
+  }
+
+  /**
+   * True while the game is actually running. STARTING is included because
+   * Room.startGame() invokes onGameStart() (and thus beginGame/startTurn for
+   * rooms with no setup phase) before flipping the state to IN_PROGRESS.
+   */
+  private isGameActive(): boolean {
+    return (
+      this.roomState === RoomState.IN_PROGRESS ||
+      this.roomState === RoomState.STARTING
+    );
+  }
+
+  public dispose(): void {
+    this.clearTurnTimer();
+    this.clearSetupTimer();
+    this.clearBetweenTurnsTimer();
+    super.dispose();
   }
 
   // ============================================================================
