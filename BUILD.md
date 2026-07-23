@@ -1503,6 +1503,34 @@ The contact form uses **Mailtrap** for transactional email delivery.
   (owns the outage with full root cause, documents the relay contract, asks
   for the missing spec).
 
+- **Committed and pushed** ✅ Commit `45fa9cf` on `origin/main`:
+  "Phase 15: fix TurnBasedRoom hang (July 21 outage) + historical_conquest
+  relay room" — 10 files, 989 insertions: TurnBasedRoom fix, relay room +
+  registration, both test suites, `test-hc-relay-production.js`, integration
+  guide, response letter, BUILD.md. The long-standing pre-existing WIP
+  (src/bots/, src/database/, db/init.sql, package.json/lock, website tree,
+  etc.) was left uncommitted per the repo's established pattern.
+
+- **Letter to the HC team DELIVERED** (via the user — copy/paste text was
+  produced in-session; permanent copy at
+  `docs/conversation/RESPONSE_HC_RELAY_AND_OUTAGE_FIX.md`). The only asks of
+  them: (1) resend the spec attachment that never arrived, (2) tell us if
+  their protocol needs `echoToSender: true`. **Their spec drives the next HC
+  work item** (exact-wire-shape verification script).
+
+- **Lessons worth carrying forward:**
+  - Any `setTimeout` a room schedules MUST be stored and cancelled in
+    `onGameEnd()`/`dispose()` — an orphaned timer firing into ended-game
+    state is how one room took down the whole single-process server.
+    A synchronous `while` loop over player state needs a proven-nonempty
+    exit condition; the event loop has no watchdog.
+  - The wedged-server signature, for future incident triage: ALB answers
+    (504), instance "healthy" in EC2 but EB health Red/Severe
+    (Target.FailedHealthChecks), CPU pinned at ~1 full core, app log
+    silent, room never disposed. Fastest restore:
+    `aws elasticbeanstalk restart-app-server --environment-name
+    gameonguy-production --profile eb-cli --region us-east-1`.
+
 ---
 
 ## 🚀 RESUME HERE - CURRENT PROJECT STATE
@@ -1514,20 +1542,20 @@ The contact form uses **Mailtrap** for transactional email delivery.
 **Production version:** `hc-relay-outage-fix-260723-121049` (env `gameonguy-production`, Ready/Green/Ok — TurnBasedRoom hang fix + historical_conquest relay room live)
 **historical_conquest:** RELAY room since Phase 15 (lockstep client; pure relay, no turn gating, min 2/max 4, no bots). Old simulated `HistoricalConquestRoom` unregistered but kept as reference.
 **Server-side bots:** OFF for all games (opt-in since Phase 14).
-**GitHub `main` HEAD:** Phase 15 commit — "Phase 15: fix TurnBasedRoom hang (July 21 outage) + historical_conquest relay room" (Phase 14 = `db5f02e`, Phase 13 = `4975912`)
+**GitHub `main` HEAD:** `45fa9cf` — "Phase 15: fix TurnBasedRoom hang (July 21 outage) + historical_conquest relay room" (pushed to origin/main; Phase 14 = `db5f02e`, Phase 13 = `4975912`)
 **Tests:** 239/239 PASSING (`npm test`)
 **Build:** clean (`npm run build`)
 **Rollback labels:** `hc-bots-opt-in-260721-114103` (pre-Phase-15 — ⚠️ contains the TurnBasedRoom infinite-loop bug that caused the July 21 outage; only roll back to it in an emergency and expect HC games to be able to wedge the server), `sec-hardening-260721-100650` (pre-Phase-14)
 
 **📄 Document to share with external game developers:** `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` — fully rewritten and source-verified in Phase 13. Keep it in sync whenever the wire protocol changes; it is the public face of the platform.
 
-**Games registered (7):** Lightning Round, Historical Conquest, GeoTag, **Typing Race (new this session)**, Number Munchers, Panic Attack, TimeQuest (the last three are stub registrations against base classes; full game logic not yet implemented).
+**Games registered (7):** Lightning Round, **Historical Conquest (relay room since Phase 15)**, GeoTag, Typing Race, Number Munchers, Panic Attack, TimeQuest (the last three are stub registrations against base classes; full game logic not yet implemented).
 
 ---
 
 ### ⚠️ READ THIS BEFORE YOU DEPLOY ANYTHING
 
-**`eb deploy` is broken for this repo. Do not use it.** It deploys git HEAD via `git archive`, but HEAD is intentionally behind the working tree (devs deploy from the working tree directly via a pre-built zip). Even after this session committed typing_race + the GeoTag registry sync, lots of in-tree changes remain uncommitted by design. Running `eb deploy` would ship git HEAD (potentially regressing prod) AND would fail to compile on the EB instance anyway because the Node platform here doesn't install devDependencies, so `tsc` isn't available remotely.
+**`eb deploy` is broken for this repo. Do not use it.** It deploys git HEAD via `git archive`, but HEAD is intentionally behind the working tree (devs deploy from the working tree directly via a pre-built zip). Even though Phases 11–15 each committed their own new work, lots of in-tree changes remain uncommitted by design. Running `eb deploy` would ship git HEAD (potentially regressing prod) AND would fail to compile on the EB instance anyway because the Node platform here doesn't install devDependencies, so `tsc` isn't available remotely.
 
 **The deploy path that actually works** (verified this session):
 
@@ -1599,7 +1627,7 @@ curl https://multiplayer.gameonguy.com/health
 | `node test-typing-race-production.js` | Phase 11. Connects two guest clients, creates a `typing_race` room, runs `race_setup` → `progress` → `finish` using the **canonical** `payload.type` shape, asserts `game_end` carries standings. Regression check. |
 | `node test-typing-race-action-key.js` | Phase 12. Same flow but uses **Turbo Type's** `payload.action` wire shape. This is the script that catches the kind of silent-drop bug Phase 12 fixed. Run this against any new typing_race deploy. |
 
-If any of these fail after a deploy, you've broken something — roll back via `update-environment --version-label <previous-label>` (e.g. `tr-typing-race-260528-153300` for the pre-Phase-12 build, `app-271` for the pre-Phase-11 build).
+If any of these fail after a deploy, you've broken something — roll back via `update-environment --version-label <previous-label>`. ⚠️ **Every label older than `hc-relay-outage-fix-260723-121049` contains the TurnBasedRoom infinite-loop bug** (the July 21 outage) AND serves HC the old simulated turn room, which the HC: The Digital lockstep client can't use. Rolling back is a last resort; prefer fixing forward.
 
 ---
 
@@ -1650,13 +1678,16 @@ The old simulated `HistoricalConquestRoom` (turn order, combat, resources) is st
 ```bash
 cd "C:\Users\edwar\Documents\Business\Xogos Gaming\0. Xogos Code\9. Multiplayer Server Services"
 npm run build && npm start
+# then, in another terminal (any port works via env override):
+GAMEON_URL=ws://localhost:3000/ws node test-hc-relay-production.js
 ```
 
-### Test HC Matchmaking on Production (no bot expected)
+### Test HC on Production
 ```bash
-node test-hc-no-bot-production.js
+node test-hc-relay-production.js         # relay room end-to-end (canonical since Phase 15)
+node test-hc-no-bot-production.js        # matchmaking: matchmake_timeout ~20s, no bot
 ```
-Expected output: `matchmake_timeout` at ~20 seconds and **no** bot/room join — PASS banner. (`test-bot-production.js` is the legacy inverse test; it now "fails" by design.)
+(`test-bot-production.js` is the legacy inverse test; it now "fails" by design.)
 
 ---
 
@@ -1696,6 +1727,7 @@ If any of these are red, fix that before adding scope. (Do NOT run `test-bot-pro
 #### 2. Outstanding work, in rough priority order
 
 - **🟡 HC: The Digital — get their spec re-sent** and verify the relay against their exact wire shapes (see "🏛️ Historical Conquest status" above). The relay itself is live and verified shape-agnostically.
+- **🟡 Prod database credentials are BROKEN (found in the Phase 15 log dive, not yet fixed).** The July 21 boot log shows `ER_ACCESS_DENIED_ERROR: Access denied for user 'gameondude'@'172.31.21.49'` against the RDS MySQL host (`gameondude.csd0aykwyxcz...`), 3 retries, then "Database connection failed - running without persistence". The server tolerates this by design (games don't need the DB), but the `DATABASE_URL` on the EB env has a wrong password/user or the RDS grant is missing. Fix it (or remove `DATABASE_URL` if persistence is truly unwanted) — right now every boot burns 3 s retrying and match/user persistence silently does nothing.
 - **🟡 Optional prod env hardening:** rotate `JWT_SECRET` to a 48+ byte random value (`openssl rand -base64 48`; only guests use auth today, so rotation is free); set `ADMIN_API_KEY` if remote admin API access is ever needed. (The leftover `YOUR_ENDPOINT`/`YOUR_PASSWORD` vars were removed in Phase 13.)
 - **🟡 Long-standing uncommitted WIP cleanup — SHRUNK in Phases 13–14.** Now committed: BUILD.md, AuthService, Server.ts, AdminServer, MatchmakingService, HistoricalConquestRoom, both integration guides. Still uncommitted vs HEAD: `src/bots/` (months-old bot changes), `src/database/` repositories, `db/init.sql`, `package.json`/lock, `.ebextensions/03-https.config`, and the website tree (including the Phase 7 auth system). This code has been running on prod for months. When you have a low-risk window, walk the diff file-by-file and commit in logical chunks so git stops lying about reality.
 - **🟢 Short room code (Turbo Type nice-to-have).** Rooms still return UUIDs in `payload.id`. Turbo Type tolerates UUIDs and didn't block on this. Implement as a non-breaking addition — extra field, UUID still valid — so existing games keep working. Don't replace the UUID; the room manager looks rooms up by it.
@@ -1704,7 +1736,11 @@ If any of these are red, fix that before adding scope. (Do NOT run `test-bot-pro
 - **🟢 Marketing site auth (Phase 7).** Pages and API routes for login/register/dashboard exist locally under `website/src/app/{login,register,dashboard,verify-email}` and `website/src/app/api/auth/*`. Never committed. If you ship them, also commit them.
 
 #### 3. Adding a new game (template)
-The newest reference implementations are `src/games/xogos/GeoTagRoom.ts` (full simulation room) and `src/games/xogos/TypingRaceRoom.ts` (lightweight relay — useful if you just need to bounce messages between players without server-side rules). The general recipe is in "Adding a New Game" earlier in this doc.
+Reference implementations, newest first:
+- `src/games/xogos/HistoricalConquestRelayRoom.ts` (Phase 15) — **purest relay**: forwards any game_action verbatim to the other players, zero server rules. Start here for lockstep clients.
+- `src/games/xogos/TypingRaceRoom.ts` (Phases 11–12) — relay WITH light server logic (host-only setup, ranking, game_end).
+- `src/games/xogos/GeoTagRoom.ts` (Phase 7) — full server-side simulation room.
+The general recipe is in "Adding a New Game" earlier in this doc. If you build on `TurnBasedRoom`, note the Phase 15 lesson: any timer a room schedules must be cleared in `onGameEnd()`/`dispose()`, or an orphaned callback can wedge the whole process.
 
 For relay-style rooms specifically, the key trick `TypingRaceRoom` uses is overriding `public handleGameAction()` to bypass the base `Room`'s `IN_PROGRESS` gate so actions are accepted as soon as players are in the room. Copy that pattern.
 
@@ -2038,13 +2074,20 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 ## Outstanding Work
 
 ### 🔴 Critical (Blocking)
-1. **Historical Conquest: The Digital integration** — waiting on the HC team's
-   answers to the Phase 14 letter (relay vs simulated, exact action JSON,
-   matchmaking prefs, build targets, disconnect policy, extras). Server side
-   is otherwise ready. Full plan: "🏛️ Historical Conquest status" in the
-   RESUME HERE block.
+*(none — the July 21–23 outage and the HC relay request were both resolved
+in Phase 15)*
 
 ### 🟡 Important
+0. **HC: The Digital exact-shape verification** — relay room is LIVE, but
+   their message-shapes spec never arrived; response letter asked for a
+   re-send. When it comes: verify the relayed-message shape their client
+   expects to receive (incl. whether they need `echoToSender: true`) and
+   extend `test-hc-relay-production.js` to speak their exact wire shapes.
+   See "🏛️ Historical Conquest status" in the RESUME HERE block.
+0.5. **Prod DATABASE_URL credentials rejected by RDS** (found Phase 15) —
+   server boots "without persistence" after 3 access-denied retries. Fix
+   the credentials/grant or drop the env var. Details in the RESUME HERE
+   outstanding-work list.
 1. **Website Auth System** - Code written in Phase 7 but NOT committed
    - MySQL-based login/register/dashboard
    - Files in `website/src/app/login`, `/register`, `/dashboard`, `/verify-email`
@@ -2065,7 +2108,7 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 *Built for Game On Dude! - www.gameonguy.com*
 *Production Server: wss://multiplayer.gameonguy.com/ws*
 *Production Version: hc-relay-outage-fix-260723-121049 (Phases 13+14+15 live)*
-*GitHub `main` HEAD: Phase 15 commit (Phase 14 = db5f02e, Phase 13 = 4975912)*
+*GitHub `main` HEAD: 45fa9cf — Phase 15 (Phase 14 = db5f02e, Phase 13 = 4975912)*
 *239 Unit Tests Passing*
 *7 Games Registered (Lightning Round, Historical Conquest [relay], GeoTag, Typing Race, TimeQuest, Number Munchers, Panic Attack)*
 *Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md (AI-assistant version: website/public/gameon-multiplayer-ai-integration-guide.md)*
