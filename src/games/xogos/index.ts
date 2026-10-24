@@ -27,3 +27,4 @@ export {
 } from './HistoricalConquestRelayRoom';
 export { GeoTagRoom } from './GeoTagRoom';
 export { TypingRaceRoom, TypingRaceRoomOptions } from './TypingRaceRoom';
+export { PanicAttackRoom } from './PanicAttackRoom';

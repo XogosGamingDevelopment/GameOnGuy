@@ -1,0 +1,1010 @@
+{
+  "captured": "2026-10-15T15:34:25.763Z",
+  "server": "wss://multiplayer.gameonguy.com/ws",
+  "gameType": "panic_attack_test",
+  "note": "Real frames from Panic Attack's 3-browser test (host = room creator). Same messages are used on panic_attack.",
+  "samples": {
+    "host received welcome": {
+      "type": "welcome",
+      "payload": {
+        "clientId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "sessionId": "b14d063d-880e-448a-b6c9-e6d3a89886ec",
+        "serverTime": 1792078393566
+      },
+      "timestamp": 1792078393566,
+      "sequence": 0
+    },
+    "host sent auth": {
+      "type": "auth",
+      "payload": {
+        "username": "Kid501",
+        "guestId": "xogos-501"
+      }
+    },
+    "host received auth_success": {
+      "type": "auth_success",
+      "payload": {
+        "userId": "guest_xogos-501",
+        "username": "Kid501",
+        "sessionId": "b14d063d-880e-448a-b6c9-e6d3a89886ec"
+      },
+      "timestamp": 1792078393589,
+      "sequence": 1
+    },
+    "guest received welcome": {
+      "type": "welcome",
+      "payload": {
+        "clientId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "sessionId": "30e39aef-2170-464d-b766-f7370c970e8b",
+        "serverTime": 1792078393862
+      },
+      "timestamp": 1792078393862,
+      "sequence": 0
+    },
+    "guest sent auth": {
+      "type": "auth",
+      "payload": {
+        "username": "Kid502",
+        "guestId": "xogos-502"
+      }
+    },
+    "guest received auth_success": {
+      "type": "auth_success",
+      "payload": {
+        "userId": "guest_xogos-502",
+        "username": "Kid502",
+        "sessionId": "30e39aef-2170-464d-b766-f7370c970e8b"
+      },
+      "timestamp": 1792078393891,
+      "sequence": 1
+    },
+    "host sent room_create": {
+      "type": "room_create",
+      "payload": {
+        "gameType": "panic_attack_test",
+        "options": {
+          "gameMode": "hidden",
+          "maxPlayers": 6
+        }
+      }
+    },
+    "host received room_created": {
+      "type": "room_created",
+      "payload": {
+        "id": "ab71f91a-d4ec-4c6f-a7a8-09c6354d95e4",
+        "name": "panic_attack_test-ab71f91a",
+        "gameType": "panic_attack_test",
+        "gameMode": "hidden",
+        "state": "waiting",
+        "playerCount": 1,
+        "maxPlayers": 6,
+        "isPrivate": true,
+        "hasPassword": false,
+        "createdAt": 1792078395022,
+        "joinCode": "SDKKJ",
+        "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4"
+      },
+      "timestamp": 1792078395023,
+      "sequence": 2
+    },
+    "host sent game_action:lobby": {
+      "type": "game_action",
+      "payload": {
+        "type": "lobby",
+        "data": {
+          "mode": "hidden",
+          "map": "school",
+          "feelings": {},
+          "startsAt": null
+        }
+      }
+    },
+    "guest sent room_join": {
+      "type": "room_join",
+      "payload": {
+        "joinCode": "SDKKJ"
+      }
+    },
+    "host received player_joined": {
+      "type": "player_joined",
+      "payload": {
+        "id": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "name": "Kid502",
+        "isHost": false
+      },
+      "timestamp": 1792078395505,
+      "sequence": 3
+    },
+    "guest received room_joined": {
+      "type": "room_joined",
+      "payload": {
+        "room": {
+          "id": "ab71f91a-d4ec-4c6f-a7a8-09c6354d95e4",
+          "name": "panic_attack_test-ab71f91a",
+          "gameType": "panic_attack_test",
+          "gameMode": "hidden",
+          "state": "waiting",
+          "playerCount": 2,
+          "maxPlayers": 6,
+          "isPrivate": true,
+          "hasPassword": false,
+          "createdAt": 1792078395022,
+          "joinCode": "SDKKJ",
+          "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4"
+        },
+        "state": {
+          "phase": "lobby",
+          "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+          "joinCode": "SDKKJ",
+          "isPrivate": true,
+          "players": [
+            {
+              "id": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+              "name": "Kid501",
+              "isHost": true
+            },
+            {
+              "id": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+              "name": "Kid502",
+              "isHost": false
+            }
+          ]
+        }
+      },
+      "timestamp": 1792078395506,
+      "sequence": 2
+    },
+    "guest received game_action:lobby": {
+      "type": "game_action",
+      "payload": {
+        "type": "lobby",
+        "action": "lobby",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "mode": "hidden",
+          "map": "school",
+          "feelings": {},
+          "startsAt": null
+        },
+        "timestamp": 1792078395528
+      },
+      "timestamp": 1792078395528,
+      "sequence": 3
+    },
+    "guest received player_joined": {
+      "type": "player_joined",
+      "payload": {
+        "id": "455fe360-d981-449e-b4b9-3cd704acc5e4",
+        "name": "Kid503",
+        "isHost": false
+      },
+      "timestamp": 1792078395977,
+      "sequence": 4
+    },
+    "guest sent game_action:feeling": {
+      "type": "game_action",
+      "payload": {
+        "type": "feeling",
+        "data": {
+          "feeling": "yellow"
+        }
+      }
+    },
+    "host received game_action:feeling": {
+      "type": "game_action",
+      "payload": {
+        "type": "feeling",
+        "action": "feeling",
+        "playerId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "fromHost": false,
+        "data": {
+          "feeling": "yellow"
+        },
+        "timestamp": 1792078396601
+      },
+      "timestamp": 1792078396601,
+      "sequence": 5
+    },
+    "guest sent game_action:chat": {
+      "type": "game_action",
+      "payload": {
+        "type": "chat",
+        "data": {
+          "phrase": "nice"
+        }
+      }
+    },
+    "guest received game_action:chat": {
+      "type": "game_action",
+      "payload": {
+        "type": "chat",
+        "action": "chat",
+        "playerId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "fromHost": false,
+        "data": {
+          "phrase": "nice"
+        },
+        "timestamp": 1792078397237,
+        "serverChecked": true
+      },
+      "timestamp": 1792078397237,
+      "sequence": 9
+    },
+    "host received game_action:chat": {
+      "type": "game_action",
+      "payload": {
+        "type": "chat",
+        "action": "chat",
+        "playerId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "fromHost": false,
+        "data": {
+          "phrase": "nice"
+        },
+        "timestamp": 1792078397237,
+        "serverChecked": true
+      },
+      "timestamp": 1792078397237,
+      "sequence": 7
+    },
+    "host sent game_action:start": {
+      "type": "game_action",
+      "payload": {
+        "type": "start",
+        "data": {
+          "setup": {
+            "seed": 2979320968,
+            "map": "school",
+            "mode": "hidden",
+            "rulesLevel": 3,
+            "twist": "fog",
+            "outageAt": 165,
+            "assign": {
+              "f58e1b4f-5888-42d2-b1fa-f679235920e3": "yellow",
+              "310c19c2-3cc5-47eb-b86b-225ef7e2cab4": "pink",
+              "455fe360-d981-449e-b4b9-3cd704acc5e4": "red"
+            },
+            "names": {
+              "pink": "Kid501",
+              "yellow": "Kid502",
+              "red": "Kid503"
+            },
+            "kind": "private",
+            "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4"
+          }
+        }
+      }
+    },
+    "host sent game_action:secret (to one player)": {
+      "type": "game_action",
+      "payload": {
+        "type": "secret",
+        "data": {
+          "secret": {
+            "role": "worry",
+            "mission": "hidden"
+          }
+        },
+        "to": "f58e1b4f-5888-42d2-b1fa-f679235920e3"
+      }
+    },
+    "guest received game_action:start": {
+      "type": "game_action",
+      "payload": {
+        "type": "start",
+        "action": "start",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "setup": {
+            "seed": 2979320968,
+            "map": "school",
+            "mode": "hidden",
+            "rulesLevel": 3,
+            "twist": "fog",
+            "outageAt": 165,
+            "assign": {
+              "f58e1b4f-5888-42d2-b1fa-f679235920e3": "yellow",
+              "310c19c2-3cc5-47eb-b86b-225ef7e2cab4": "pink",
+              "455fe360-d981-449e-b4b9-3cd704acc5e4": "red"
+            },
+            "names": {
+              "pink": "Kid501",
+              "yellow": "Kid502",
+              "red": "Kid503"
+            },
+            "kind": "private",
+            "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4"
+          }
+        },
+        "timestamp": 1792078397943
+      },
+      "timestamp": 1792078397943,
+      "sequence": 10
+    },
+    "guest received game_action:secret": {
+      "type": "game_action",
+      "payload": {
+        "type": "secret",
+        "action": "secret",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "secret": {
+            "role": "detective",
+            "mission": "detective"
+          }
+        },
+        "timestamp": 1792078397945
+      },
+      "timestamp": 1792078397945,
+      "sequence": 9
+    },
+    "host sent game_action:snap": {
+      "type": "game_action",
+      "payload": {
+        "type": "snap",
+        "data": {
+          "t": 389.9,
+          "a": [
+            [
+              "red",
+              4.5,
+              0,
+              0,
+              0
+            ],
+            [
+              "blue",
+              2.59,
+              3.91,
+              1.53,
+              32
+            ],
+            [
+              "purple",
+              -2.2,
+              3.56,
+              3,
+              32
+            ],
+            [
+              "pink",
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              "yellow",
+              -2.25,
+              -3.9,
+              0,
+              0
+            ],
+            [
+              "green",
+              2,
+              -4.12,
+              -2.31,
+              32
+            ]
+          ],
+          "p": [
+            [
+              45.77,
+              0.12,
+              -1.57,
+              8
+            ]
+          ],
+          "d": "0000000000000000",
+          "o": 0,
+          "L": 0,
+          "nc": 0,
+          "fx": []
+        }
+      }
+    },
+    "guest sent game_action:in": {
+      "type": "game_action",
+      "payload": {
+        "type": "in",
+        "data": {
+          "x": 0,
+          "z": 0,
+          "r": 0,
+          "b": 0,
+          "mv": 0
+        }
+      }
+    },
+    "guest received game_action:snap": {
+      "type": "game_action",
+      "payload": {
+        "type": "snap",
+        "action": "snap",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "t": 389.9,
+          "a": [
+            [
+              "red",
+              4.5,
+              0,
+              0,
+              0
+            ],
+            [
+              "blue",
+              2.59,
+              3.91,
+              1.53,
+              32
+            ],
+            [
+              "purple",
+              -2.2,
+              3.56,
+              3,
+              32
+            ],
+            [
+              "pink",
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              "yellow",
+              -2.25,
+              -3.9,
+              0,
+              0
+            ],
+            [
+              "green",
+              2,
+              -4.12,
+              -2.31,
+              32
+            ]
+          ],
+          "p": [
+            [
+              45.77,
+              0.12,
+              -1.57,
+              8
+            ]
+          ],
+          "d": "0000000000000000",
+          "o": 0,
+          "L": 0,
+          "nc": 0,
+          "fx": []
+        },
+        "timestamp": 1792078401052
+      },
+      "timestamp": 1792078401052,
+      "sequence": 10
+    },
+    "host received game_action:in": {
+      "type": "game_action",
+      "payload": {
+        "type": "in",
+        "action": "in",
+        "playerId": "455fe360-d981-449e-b4b9-3cd704acc5e4",
+        "fromHost": false,
+        "data": {
+          "x": 0,
+          "z": 0,
+          "r": 0,
+          "b": 0,
+          "mv": 0
+        },
+        "timestamp": 1792078401114
+      },
+      "timestamp": 1792078401114,
+      "sequence": 8
+    },
+    "host sent game_action:you (to one player)": {
+      "type": "game_action",
+      "payload": {
+        "type": "you",
+        "data": {
+          "hw": {
+            "huddlesLeft": 3,
+            "huddleReady": false,
+            "caught": false,
+            "canReport": false,
+            "cards": [],
+            "iAmWorry": false,
+            "smudge": null,
+            "whisper": null
+          },
+          "mission": {
+            "done": false,
+            "have": 0,
+            "goal": 1
+          },
+          "rescueP": 0
+        },
+        "to": "455fe360-d981-449e-b4b9-3cd704acc5e4"
+      }
+    },
+    "guest received game_action:you": {
+      "type": "game_action",
+      "payload": {
+        "type": "you",
+        "action": "you",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "hw": {
+            "huddlesLeft": 3,
+            "huddleReady": false,
+            "caught": false,
+            "canReport": false,
+            "cards": [],
+            "iAmWorry": false,
+            "smudge": null,
+            "whisper": null
+          },
+          "mission": {
+            "done": false,
+            "have": 0,
+            "goal": 1
+          },
+          "rescueP": 0
+        },
+        "timestamp": 1792078401335
+      },
+      "timestamp": 1792078401335,
+      "sequence": 13
+    },
+    "guest sent game_action:station": {
+      "type": "game_action",
+      "payload": {
+        "type": "station",
+        "data": {
+          "idx": 0
+        }
+      }
+    },
+    "host received game_action:station": {
+      "type": "game_action",
+      "payload": {
+        "type": "station",
+        "action": "station",
+        "playerId": "455fe360-d981-449e-b4b9-3cd704acc5e4",
+        "fromHost": false,
+        "data": {
+          "idx": 0
+        },
+        "timestamp": 1792078404716
+      },
+      "timestamp": 1792078404716,
+      "sequence": 72
+    },
+    "guest sent game_action:act": {
+      "type": "game_action",
+      "payload": {
+        "type": "act",
+        "data": {
+          "a": "huddle"
+        }
+      }
+    },
+    "host received game_action:act": {
+      "type": "game_action",
+      "payload": {
+        "type": "act",
+        "action": "act",
+        "playerId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "fromHost": false,
+        "data": {
+          "a": "huddle"
+        },
+        "timestamp": 1792078405420
+      },
+      "timestamp": 1792078405420,
+      "sequence": 88
+    },
+    "guest received game_action:huddle": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle",
+        "action": "huddle",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "data": {
+            "callerId": "yellow",
+            "reason": "button",
+            "victimId": null,
+            "myId": "yellow",
+            "iAmWorry": true,
+            "myCards": [],
+            "frozen": [],
+            "net": true,
+            "statements": []
+          }
+        },
+        "timestamp": 1792078405475
+      },
+      "timestamp": 1792078405475,
+      "sequence": 65
+    },
+    "guest received game_action:huddle_update": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_update",
+        "action": "huddle_update",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "upd": {
+            "statements": [
+              {
+                "speaker": "blue",
+                "sentence": "unsure",
+                "accuse": [],
+                "vouch": []
+              },
+              {
+                "speaker": "purple",
+                "sentence": "unsure",
+                "accuse": [],
+                "vouch": []
+              },
+              {
+                "speaker": "green",
+                "sentence": "busy",
+                "accuse": [],
+                "vouch": []
+              }
+            ],
+            "waitingFor": [
+              "red",
+              "pink",
+              "yellow"
+            ],
+            "secondsLeft": 75,
+            "result": null
+          }
+        },
+        "timestamp": 1792078405475
+      },
+      "timestamp": 1792078405475,
+      "sequence": 66
+    },
+    "host sent game_action:huddle (to one player)": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle",
+        "data": {
+          "data": {
+            "callerId": "yellow",
+            "reason": "button",
+            "victimId": null,
+            "myId": "red",
+            "iAmWorry": false,
+            "myCards": [],
+            "frozen": [],
+            "net": true,
+            "statements": []
+          }
+        },
+        "to": "455fe360-d981-449e-b4b9-3cd704acc5e4"
+      }
+    },
+    "host sent game_action:huddle_update": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_update",
+        "data": {
+          "upd": {
+            "statements": [
+              {
+                "speaker": "blue",
+                "sentence": "unsure",
+                "accuse": [],
+                "vouch": []
+              },
+              {
+                "speaker": "purple",
+                "sentence": "unsure",
+                "accuse": [],
+                "vouch": []
+              },
+              {
+                "speaker": "green",
+                "sentence": "busy",
+                "accuse": [],
+                "vouch": []
+              }
+            ],
+            "waitingFor": [
+              "red",
+              "pink",
+              "yellow"
+            ],
+            "secondsLeft": 75,
+            "result": null
+          }
+        }
+      }
+    },
+    "guest sent game_action:huddle_say": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_say",
+        "data": {
+          "s": {
+            "sentence": "unsure",
+            "args": {
+              "who": null,
+              "where": null
+            },
+            "accuse": [],
+            "vouch": []
+          }
+        }
+      }
+    },
+    "host received game_action:huddle_say": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_say",
+        "action": "huddle_say",
+        "playerId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "fromHost": false,
+        "data": {
+          "s": {
+            "sentence": "unsure",
+            "args": {
+              "who": null,
+              "where": null
+            },
+            "accuse": [],
+            "vouch": []
+          }
+        },
+        "timestamp": 1792078408305
+      },
+      "timestamp": 1792078408305,
+      "sequence": 91
+    },
+    "guest sent game_action:huddle_vote": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_vote",
+        "data": {
+          "v": "skip"
+        }
+      }
+    },
+    "host received game_action:huddle_vote": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_vote",
+        "action": "huddle_vote",
+        "playerId": "f58e1b4f-5888-42d2-b1fa-f679235920e3",
+        "fromHost": false,
+        "data": {
+          "v": "skip"
+        },
+        "timestamp": 1792078411440
+      },
+      "timestamp": 1792078411440,
+      "sequence": 93
+    },
+    "host sent game_action:huddle_end": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_end",
+        "data": {}
+      }
+    },
+    "guest received game_action:huddle_end": {
+      "type": "game_action",
+      "payload": {
+        "type": "huddle_end",
+        "action": "huddle_end",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {},
+        "timestamp": 1792078419145
+      },
+      "timestamp": 1792078419145,
+      "sequence": 78
+    },
+    "guest received game_action:end": {
+      "type": "game_action",
+      "payload": {
+        "type": "end",
+        "action": "end",
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+        "fromHost": true,
+        "data": {
+          "allDone": true,
+          "reason": null,
+          "used": 5,
+          "missions": {
+            "red": false,
+            "yellow": true
+          },
+          "worry": {
+            "id": "yellow",
+            "caught": false
+          }
+        },
+        "timestamp": 1792078420325
+      },
+      "timestamp": 1792078420325,
+      "sequence": 92
+    },
+    "host sent game_action:end": {
+      "type": "game_action",
+      "payload": {
+        "type": "end",
+        "data": {
+          "allDone": true,
+          "reason": null,
+          "used": 5,
+          "missions": {
+            "red": false,
+            "yellow": true
+          },
+          "worry": {
+            "id": "yellow",
+            "caught": false
+          }
+        }
+      }
+    },
+    "host sent room_leave": {
+      "type": "room_leave"
+    },
+    "host received room_left": {
+      "type": "room_left",
+      "timestamp": 1792078429756,
+      "sequence": 135
+    },
+    "guest received player_left": {
+      "type": "player_left",
+      "payload": {
+        "playerId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4"
+      },
+      "timestamp": 1792078429755,
+      "sequence": 120
+    },
+    "guest received room_closed": {
+      "type": "room_closed",
+      "payload": {
+        "reason": "host_left",
+        "message": "The host left."
+      },
+      "timestamp": 1792078429756,
+      "sequence": 121
+    },
+    "host sent matchmake_request": {
+      "type": "matchmake_request",
+      "payload": {
+        "gameType": "panic_attack_test",
+        "gameMode": "classic"
+      }
+    },
+    "host received matchmake_started": {
+      "type": "matchmake_started",
+      "payload": {
+        "ticketId": "3dda6163-1aa4-446b-957d-5f818e547ee0",
+        "gameType": "panic_attack_test",
+        "estimatedWait": 20
+      },
+      "timestamp": 1792078432525,
+      "sequence": 136
+    },
+    "host received matchmake_update": {
+      "type": "matchmake_update",
+      "payload": {
+        "gameType": "panic_attack_test",
+        "gameMode": "classic",
+        "playersFound": 1,
+        "minPlayers": 2,
+        "maxPlayers": 6,
+        "startsAt": null,
+        "startsInMs": null
+      },
+      "timestamp": 1792078432609,
+      "sequence": 137
+    },
+    "guest sent matchmake_request": {
+      "type": "matchmake_request",
+      "payload": {
+        "gameType": "panic_attack_test",
+        "gameMode": "classic"
+      }
+    },
+    "guest received matchmake_started": {
+      "type": "matchmake_started",
+      "payload": {
+        "ticketId": "23e2ecf1-a0e2-4217-9e7b-58eb52844f5d",
+        "gameType": "panic_attack_test",
+        "estimatedWait": 20
+      },
+      "timestamp": 1792078433387,
+      "sequence": 122
+    },
+    "guest received matchmake_update": {
+      "type": "matchmake_update",
+      "payload": {
+        "gameType": "panic_attack_test",
+        "gameMode": "classic",
+        "playersFound": 2,
+        "minPlayers": 2,
+        "maxPlayers": 6,
+        "startsAt": 1792078453610,
+        "startsInMs": 20000
+      },
+      "timestamp": 1792078433610,
+      "sequence": 123
+    },
+    "host received matchmake_found": {
+      "type": "matchmake_found",
+      "payload": {
+        "roomId": "3836db64-d0f4-4b10-bb9d-65e17760c56f",
+        "gameType": "panic_attack_test",
+        "gameMode": "classic"
+      },
+      "timestamp": 1792078453621,
+      "sequence": 139
+    },
+    "guest received matchmake_found": {
+      "type": "matchmake_found",
+      "payload": {
+        "roomId": "3836db64-d0f4-4b10-bb9d-65e17760c56f",
+        "gameType": "panic_attack_test",
+        "gameMode": "classic"
+      },
+      "timestamp": 1792078453622,
+      "sequence": 124
+    },
+    "host received room_joined": {
+      "type": "room_joined",
+      "payload": {
+        "room": {
+          "id": "3836db64-d0f4-4b10-bb9d-65e17760c56f",
+          "name": "panic_attack_test-3836db64",
+          "gameType": "panic_attack_test",
+          "gameMode": "classic",
+          "state": "waiting",
+          "playerCount": 1,
+          "maxPlayers": 6,
+          "isPrivate": false,
+          "hasPassword": false,
+          "createdAt": 1792078453621,
+          "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4"
+        },
+        "state": {
+          "phase": "lobby",
+          "hostId": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+          "joinCode": null,
+          "isPrivate": false,
+          "players": [
+            {
+              "id": "310c19c2-3cc5-47eb-b86b-225ef7e2cab4",
+              "name": null,
+              "isHost": true
+            }
+          ]
+        }
+      },
+      "timestamp": 1792078453622,
+      "sequence": 140
+    }
+  }
+}
