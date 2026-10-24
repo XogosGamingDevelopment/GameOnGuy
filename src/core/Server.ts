@@ -9,6 +9,8 @@
 
 import { WebSocket, WebSocketServer } from 'ws';
 import { createServer, Server as HttpServer, IncomingMessage } from 'http';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { Client } from './Client';
 import { TypedEventEmitter } from './EventEmitter';
@@ -59,12 +61,62 @@ export interface GameOnServerConfig extends Partial<ServerConfig> {
   };
 }
 
+/** Per-game-type access rules, checked on room_create, room_join and matchmake_request. */
+export interface GameAccessPolicy {
+  /** Only clients authenticated with a game token for this game may play (guests refused). */
+  requireGameToken?: string;
+  /** Browser Origin values allowed to play. A trailing ":*" matches any port. */
+  allowedOrigins?: string[];
+  /** Child-directed game: don't log client IPs for connections from its origins. */
+  childDirected?: boolean;
+}
+
+/** Wrong join codes a connection may try per minute before being throttled. */
+const MAX_BAD_JOIN_CODES_PER_MINUTE = 10;
+
+/**
+ * The build this server runs, shown on /health: the stamp create-zip.js puts in
+ * dist/build-info.json (the deploy's version label), else GAMEON_VERSION, else
+ * package.json's version.
+ */
+function detectServerVersion(): string {
+  try {
+    const info = JSON.parse(readFileSync(join(__dirname, '..', 'build-info.json'), 'utf8'));
+    if (typeof info.version === 'string') return info.version;
+  } catch {
+    /* not a packaged build */
+  }
+  if (process.env.GAMEON_VERSION) return process.env.GAMEON_VERSION;
+  try {
+    return JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')).version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Room options a client must never set directly in room_create. */
+const SERVER_ONLY_ROOM_OPTIONS = ['fromMatchmaking', 'fromMatchmakingTimeout', 'creatorId', 'id'];
+
+/** room_error payload: always a message, plus a stable code when we have one. */
+function roomErrorPayload(error: any): { message: string; code?: string } {
+  return error?.code ? { message: error.message, code: error.code } : { message: error?.message };
+}
+
+function originMatches(origin: string, pattern: string): boolean {
+  if (pattern.endsWith(':*')) {
+    const base = pattern.slice(0, -2);
+    return origin === base || new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\d+$`).test(origin);
+  }
+  return origin === pattern;
+}
+
 export class GameOnServer extends TypedEventEmitter<ServerEvents> {
   private readonly config: ServerConfig;
   private readonly httpServer: HttpServer;
   private readonly wss: WebSocketServer;
   private readonly clients: Map<string, Client> = new Map();
   private heartbeatInterval?: NodeJS.Timeout;
+  private readonly accessPolicies: Map<string, GameAccessPolicy> = new Map();
 
   public readonly roomManager: RoomManager;
   public readonly authService: AuthService;
@@ -77,12 +129,22 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
 
+    const version = detectServerVersion();
+
     // Create HTTP server for WebSocket upgrade
     this.httpServer = createServer((req, res) => {
-      // Simple health check endpoint
+      // Health check endpoint (load balancer + partners' status checks). Counts only — no room or player details.
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', clients: this.clients.size }));
+        res.end(
+          JSON.stringify({
+            status: 'ok',
+            clients: this.clients.size,
+            rooms: this.roomManager.getRoomCount(),
+            version,
+            uptimeSeconds: Math.round(process.uptime()),
+          })
+        );
         return;
       }
       res.writeHead(404);
@@ -152,14 +214,59 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
     });
   }
 
+  /**
+   * Restrict who may play a game type (see GameAccessPolicy).
+   */
+  public setGameAccessPolicy(gameType: string, policy: GameAccessPolicy): void {
+    this.accessPolicies.set(gameType, policy);
+    this.log.info({ gameType, policy }, 'Game access policy set');
+  }
+
+  /**
+   * Returns a refusal message if the client may not play this game type.
+   */
+  public checkGameAccess(client: Client, gameType: string): string | null {
+    const policy = this.accessPolicies.get(gameType);
+    if (!policy) return null;
+
+    if (policy.allowedOrigins) {
+      const origin = client.metadata.origin;
+      if (typeof origin !== 'string' || !policy.allowedOrigins.some((p) => originMatches(origin, p))) {
+        return 'This game can only be played from its own website';
+      }
+    }
+
+    if (policy.requireGameToken && client.metadata.authGame !== policy.requireGameToken) {
+      return 'Please sign in through the game to play online';
+    }
+
+    return null;
+  }
+
+  private isChildDirectedOrigin(origin?: string): boolean {
+    if (!origin) return false;
+    for (const policy of this.accessPolicies.values()) {
+      if (policy.childDirected && policy.allowedOrigins?.some((p) => originMatches(origin, p))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private handleConnection(socket: WebSocket, request: IncomingMessage): void {
     const client = new Client(socket);
     this.clients.set(client.id, client);
 
+    const origin = request.headers.origin;
+    client.metadata.origin = origin;
+    const childDirected = this.isChildDirectedOrigin(origin);
+    client.metadata.childDirected = childDirected;
+
     this.log.info(
       {
         clientId: client.id,
-        ip: request.socket.remoteAddress,
+        // Student privacy: no IPs for child-directed games.
+        ip: childDirected ? undefined : request.socket.remoteAddress,
         totalClients: this.clients.size,
       },
       'Client connected'
@@ -276,7 +383,12 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
       const result = await this.authService.authenticate(payload);
 
       if (result.success) {
-        client.authenticate(result.userId!, result.username!);
+        client.metadata.authGame = result.game;
+        client.authenticate(
+          result.userId!,
+          result.username!,
+          !result.game && !client.metadata.childDirected
+        );
         client.send({
           type: MessageType.AUTH_SUCCESS,
           payload: {
@@ -307,27 +419,56 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
       return;
     }
 
+    const refusal = this.checkGameAccess(client, payload?.gameType);
+    if (refusal) {
+      this.refuseRoom(client, payload?.gameType, { message: refusal, code: 'ACCESS_DENIED' });
+      return;
+    }
+
+    const options = { ...(payload?.options ?? {}) };
+    for (const key of SERVER_ONLY_ROOM_OPTIONS) delete options[key];
+
     try {
       const room = await this.roomManager.createRoom(payload.gameType, {
-        ...payload.options,
+        ...options,
         creatorId: client.userId,
       });
 
       // Auto-join creator to the room
-      await this.roomManager.joinRoom(room.id, client);
+      await this.roomManager.joinRoom(room.id, client, undefined, payload?.playerData);
 
       client.send({
         type: MessageType.ROOM_CREATED,
-        payload: room.getInfo(),
+        payload: { ...room.getMemberInfo(), ...this.selfInfo(room, client) },
       });
 
       this.emit('roomCreated', room.getInfo());
     } catch (error: any) {
-      client.send({
-        type: MessageType.ROOM_ERROR,
-        payload: { message: error.message },
-      });
+      this.refuseRoom(client, payload?.gameType, roomErrorPayload(error));
     }
+  }
+
+  /**
+   * Send room_error and log the refusal with the game and code only — no ids,
+   * names or IPs (these games are played by students). CloudWatch alarms count
+   * these "Room refused" lines per game and code.
+   */
+  private refuseRoom(client: Client, gameType: unknown, payload: { message: string; code?: string }): void {
+    this.log.warn(
+      {
+        gameType: typeof gameType === 'string' ? gameType.slice(0, 40) : undefined,
+        code: payload.code ?? 'UNSPECIFIED',
+      },
+      'Room refused'
+    );
+    client.send({ type: MessageType.ROOM_ERROR, payload });
+  }
+
+  /** The joiner's own ids: room player id, plus a rejoin token in rooms that hold seats. */
+  private selfInfo(room: { playerIdOf(c: Client): string; getRejoinToken(id: string): string | undefined }, client: Client) {
+    const playerId = room.playerIdOf(client);
+    const rejoinToken = room.getRejoinToken(playerId);
+    return rejoinToken ? { playerId, rejoinToken } : { playerId };
   }
 
   private async handleRoomJoin(client: Client, payload: any): Promise<void> {
@@ -336,24 +477,64 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
       return;
     }
 
-    try {
-      await this.roomManager.joinRoom(payload.roomId, client, payload.password);
+    // Join by short code ({ joinCode: "BKTMZ" }) or by room id.
+    let roomId: string | undefined = payload?.roomId;
+    const joinCode = payload?.joinCode ?? payload?.code;
+    if (joinCode !== undefined) {
+      const now = Date.now();
+      const bad = client.metadata.badJoinCodes as { count: number; resetAt: number } | undefined;
+      if (bad && bad.resetAt > now && bad.count >= MAX_BAD_JOIN_CODES_PER_MINUTE) {
+        this.refuseRoom(client, undefined, {
+          message: 'Too many wrong codes. Please wait a minute and try again.',
+          code: 'TOO_MANY_ATTEMPTS',
+        });
+        return;
+      }
+      roomId = this.roomManager.findRoomIdByCode(joinCode);
+      if (!roomId) {
+        if (!bad || bad.resetAt <= now) {
+          client.metadata.badJoinCodes = { count: 1, resetAt: now + 60000 };
+        } else {
+          bad.count++;
+        }
+        this.refuseRoom(client, undefined, { message: 'Room not found', code: 'ROOM_NOT_FOUND' });
+        return;
+      }
+    }
 
-      const room = this.roomManager.getRoom(payload.roomId);
+    const target = roomId ? this.roomManager.getRoom(roomId) : undefined;
+    if (target) {
+      const refusal = this.checkGameAccess(client, target.gameType);
+      if (refusal) {
+        this.refuseRoom(client, target.gameType, { message: refusal, code: 'ACCESS_DENIED' });
+        return;
+      }
+    }
+
+    // { roomId | joinCode, rejoinToken }: take back a seat held after a dropped connection.
+    const rejoining = payload?.rejoinToken !== undefined;
+
+    try {
+      if (rejoining) {
+        await this.roomManager.rejoinRoom(roomId as string, client, payload.rejoinToken);
+      } else {
+        await this.roomManager.joinRoom(roomId as string, client, payload.password, payload?.playerData);
+      }
+
+      const room = this.roomManager.getRoom(roomId as string);
       if (room) {
         client.send({
           type: MessageType.ROOM_JOINED,
           payload: {
-            room: room.getInfo(),
+            room: room.getMemberInfo(),
             state: room.getState(),
+            ...this.selfInfo(room, client),
+            ...(rejoining ? { rejoined: true } : {}),
           },
         });
       }
     } catch (error: any) {
-      client.send({
-        type: MessageType.ROOM_ERROR,
-        payload: { message: error.message },
-      });
+      this.refuseRoom(client, target?.gameType, roomErrorPayload(error));
     }
   }
 
@@ -376,7 +557,7 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
     if (client.currentRoomId) {
       const room = this.roomManager.getRoom(client.currentRoomId);
       if (room) {
-        room.setPlayerReady(client.id, payload?.ready ?? true);
+        room.setPlayerReady(client.id, payload?.ready ?? true, payload);
       }
     }
   }
@@ -398,6 +579,12 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
 
     if (!client.isAuthenticated) {
       client.sendError('Must be authenticated to matchmake');
+      return;
+    }
+
+    const refusal = this.checkGameAccess(client, payload?.gameType);
+    if (refusal) {
+      client.sendError(refusal);
       return;
     }
 
@@ -446,9 +633,9 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
       'Client disconnected'
     );
 
-    // Leave room if in one
+    // Leave room if in one (rooms with a rejoin hold keep the seat for a while)
     if (client.currentRoomId) {
-      this.roomManager.leaveRoom(client.currentRoomId, client).catch((error) => {
+      this.roomManager.disconnectFromRoom(client.currentRoomId, client).catch((error) => {
         this.log.error({ error }, 'Error leaving room on disconnect');
       });
     }
@@ -520,6 +707,7 @@ export class GameOnServer extends TypedEventEmitter<ServerEvents> {
 
   public async stop(): Promise<void> {
     this.stopHeartbeat();
+    this.matchmaking.stop();
 
     // Close all client connections
     this.clients.forEach((client) => {

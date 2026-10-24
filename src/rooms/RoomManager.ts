@@ -5,7 +5,8 @@
  * Manages room creation, lookup, and lifecycle.
  */
 
-import { Room, RoomConstructorOptions } from './Room';
+import { randomInt } from 'crypto';
+import { Room, RoomConstructorOptions, RoomError } from './Room';
 import { Client } from '../core/Client';
 import { RoomInfo, RoomListFilter, RoomState } from '../core/types';
 import logger from '../core/Logger';
@@ -27,6 +28,7 @@ interface RegisteredGame {
 
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
+  private joinCodes: Map<string, string> = new Map(); // code -> roomId
   private registeredGames: Map<string, RegisteredGame> = new Map();
   private server: any; // Reference to main server
 
@@ -71,9 +73,15 @@ export class RoomManager {
 
     const room = new registeredGame.constructor(gameType, roomOptions);
 
+    if (room.wantsJoinCode()) {
+      room.joinCode = this.generateJoinCode(room.joinCodeLength());
+      this.joinCodes.set(room.joinCode, room.id);
+    }
+
     // Set up room event handlers
     room.on('disposed', () => {
       this.rooms.delete(room.id);
+      if (room.joinCode) this.joinCodes.delete(room.joinCode);
       this.log.info({ roomId: room.id }, 'Room removed from manager');
     });
 
@@ -91,13 +99,44 @@ export class RoomManager {
   }
 
   /**
+   * Resolve a short join code (case-insensitive) to a room id.
+   */
+  public findRoomIdByCode(code: string): string | undefined {
+    if (typeof code !== 'string') return undefined;
+    return this.joinCodes.get(code.trim().toUpperCase());
+  }
+
+  /**
+   * Generate an unused join code (5 letters by default, 6 for rooms that ask).
+   * Consonants only (no vowels, no look-alike I/O), so a code can never spell
+   * a word — these rooms are used by K-12 students. 20^5 = 3.2M, 20^6 = 64M.
+   */
+  private generateJoinCode(length: number = 5): string {
+    const alphabet = 'BCDFGHJKLMNPQRSTVWXZ';
+    // Bounded (Phase 15 lesson: no unbounded loops on the event loop).
+    for (let attempt = 0; attempt < 1000; attempt++) {
+      let code = '';
+      for (let i = 0; i < length; i++) {
+        code += alphabet[randomInt(alphabet.length)];
+      }
+      if (!this.joinCodes.has(code)) return code;
+    }
+    throw new Error('Could not allocate a room code. Please try again.');
+  }
+
+  /**
    * Join a client to a room.
    */
-  public async joinRoom(roomId: string, client: Client, password?: string): Promise<void> {
+  public async joinRoom(
+    roomId: string,
+    client: Client,
+    password?: string,
+    playerData?: unknown
+  ): Promise<void> {
     const room = this.rooms.get(roomId);
 
     if (!room) {
-      throw new Error('Room not found');
+      throw new RoomError('Room not found', 'ROOM_NOT_FOUND');
     }
 
     // Leave current room if in one
@@ -105,7 +144,35 @@ export class RoomManager {
       await this.leaveRoom(client.currentRoomId, client);
     }
 
-    await room.addPlayer(client, password);
+    await room.addPlayer(client, password, playerData);
+  }
+
+  /**
+   * Take back a held seat after a dropped connection (rooms with a rejoin hold).
+   */
+  public async rejoinRoom(roomId: string, client: Client, rejoinToken: unknown): Promise<void> {
+    const room = this.rooms.get(roomId);
+
+    if (!room) {
+      throw new RoomError('Room not found', 'ROOM_NOT_FOUND');
+    }
+
+    if (client.currentRoomId && client.currentRoomId !== roomId) {
+      await this.leaveRoom(client.currentRoomId, client);
+    }
+
+    room.rejoin(client, rejoinToken);
+  }
+
+  /**
+   * The client's connection dropped (vs. an explicit room_leave).
+   */
+  public async disconnectFromRoom(roomId: string, client: Client): Promise<void> {
+    const room = this.rooms.get(roomId);
+
+    if (room) {
+      await room.handleDisconnect(client);
+    }
   }
 
   /**
@@ -126,6 +193,9 @@ export class RoomManager {
     const rooms: RoomInfo[] = [];
 
     this.rooms.forEach((room) => {
+      // Rooms can opt out of discovery entirely (e.g. panic_attack)
+      if (!room.isListed()) return;
+
       const info = room.getInfo();
 
       // Apply filters

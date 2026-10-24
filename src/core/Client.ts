@@ -126,12 +126,16 @@ export class Client extends TypedEventEmitter<ClientEvents> implements ClientInf
     });
   }
 
-  public authenticate(userId: string, username: string): void {
+  public authenticate(userId: string, username: string, logIdentity: boolean = true): void {
     this.userId = userId;
     this.username = username;
     this.isAuthenticated = true;
     this.emit('authenticated');
-    this.log.info({ userId, username }, 'Client authenticated');
+    if (logIdentity) {
+      this.log.info({ userId, username }, 'Client authenticated');
+    } else {
+      this.log.info('Client authenticated');
+    }
   }
 
   public setRoom(roomId: string | undefined): void {

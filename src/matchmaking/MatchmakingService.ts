@@ -22,6 +22,10 @@ interface MatchmakingQueue {
   gameType: string;
   gameMode?: string;
   tickets: Map<string, MatchmakingTicket>;
+  /** Lobby-fill mode: when the running countdown ends (epoch ms) */
+  countdownEndsAt?: number;
+  /** Lobby-fill mode: last update sent to queued players (to avoid resending) */
+  lastUpdateKey?: string;
 }
 
 // Per-game-type matchmaking configuration
@@ -30,6 +34,16 @@ export interface GameMatchmakingConfig {
   fillWithBots: boolean;     // Whether to fill with bots on timeout (opt-in)
   botDifficulty: number;     // Bot difficulty (0-100)
   minHumanPlayers: number;   // Minimum human players required
+  /**
+   * Lobby-fill mode (opt-in). Once minMatchPlayers are queued, wait this long
+   * for more players, then start; reaching maxMatchPlayers starts at once.
+   * Queued players receive matchmake_update { playersFound, startsAt }.
+   */
+  fillCountdownMs?: number;
+  minMatchPlayers?: number;
+  maxMatchPlayers?: number;
+  /** Join matched players into the room server-side (matchmake_found + room_joined, no room_join needed). */
+  autoJoinMatched?: boolean;
 }
 
 // Default game matchmaking configurations.
@@ -229,9 +243,10 @@ export class MatchmakingService {
       const config = this.getMatchmakingConfig(queue.gameType);
       const expiredTickets: MatchmakingTicket[] = [];
 
-      // Find expired tickets
+      // Find expired tickets (never while a lobby-fill countdown is running —
+      // those players are about to be matched)
       queue.tickets.forEach((ticket, ticketId) => {
-        if (ticket.expiresAt < now && ticket.status === 'pending') {
+        if (ticket.expiresAt < now && ticket.status === 'pending' && !queue.countdownEndsAt) {
           expiredTickets.push(ticket);
         }
       });
@@ -267,8 +282,65 @@ export class MatchmakingService {
       }
 
       // Try to create matches from remaining tickets
-      this.tryCreateMatch(queue);
+      if (config.fillCountdownMs !== undefined) {
+        this.tryLobbyFill(queue, config).catch((error) => {
+          this.log.error({ error, gameType: queue.gameType }, 'Error in lobby-fill matchmaking');
+        });
+      } else {
+        this.tryCreateMatch(queue);
+      }
     });
+  }
+
+  /**
+   * Lobby-fill matchmaking: countdown starts when minMatchPlayers are queued;
+   * the match starts when it ends, or immediately at maxMatchPlayers.
+   */
+  private async tryLobbyFill(queue: MatchmakingQueue, config: GameMatchmakingConfig): Promise<void> {
+    const now = Date.now();
+    const pending = Array.from(queue.tickets.values())
+      .filter((t) => t.status === 'pending')
+      .sort((a, b) => a.createdAt - b.createdAt);
+
+    const minPlayers = config.minMatchPlayers ?? 2;
+    const maxPlayers =
+      config.maxMatchPlayers ?? this.roomManager.getGameConfig(queue.gameType)?.maxPlayers ?? 10;
+
+    if (pending.length < minPlayers) {
+      queue.countdownEndsAt = undefined; // someone cancelled
+    } else if (
+      pending.length >= maxPlayers ||
+      (queue.countdownEndsAt !== undefined && now >= queue.countdownEndsAt)
+    ) {
+      queue.countdownEndsAt = undefined;
+      queue.lastUpdateKey = undefined;
+      // Leftover tickets (beyond max) start a fresh countdown next pass.
+      await this.createMatchFromTickets(queue, pending.slice(0, maxPlayers), config);
+      return;
+    } else if (queue.countdownEndsAt === undefined) {
+      queue.countdownEndsAt = now + config.fillCountdownMs!;
+    }
+
+    // Tell queued players how many are waiting and when the match starts.
+    const startsAt = queue.countdownEndsAt ?? null;
+    const updateKey = `${pending.length}:${startsAt}`;
+    if (updateKey !== queue.lastUpdateKey) {
+      queue.lastUpdateKey = updateKey;
+      for (const ticket of pending) {
+        this.getClient(ticket.request.playerId)?.send({
+          type: 'matchmake_update',
+          payload: {
+            gameType: queue.gameType,
+            gameMode: queue.gameMode,
+            playersFound: pending.length,
+            minPlayers,
+            maxPlayers,
+            startsAt,
+            startsInMs: startsAt === null ? null : Math.max(0, startsAt - now),
+          },
+        });
+      }
+    }
   }
 
   /**
@@ -465,8 +537,13 @@ export class MatchmakingService {
    */
   private async createMatchFromTickets(
     queue: MatchmakingQueue,
-    tickets: MatchmakingTicket[]
+    tickets: MatchmakingTicket[],
+    config?: GameMatchmakingConfig
   ): Promise<void> {
+    if (config?.autoJoinMatched) {
+      return this.createAutoJoinedMatch(queue, tickets);
+    }
+
     try {
       // Create room
       const room = await this.roomManager.createRoom(queue.gameType, {
@@ -525,6 +602,69 @@ export class MatchmakingService {
     } catch (error) {
       this.log.error({ error }, 'Failed to create match');
     }
+  }
+
+  /**
+   * Create a room and join the matched players into it server-side, in
+   * queue order (so the first player queued joins first — rooms that pick
+   * the first joiner as host get a deterministic host). Each player receives
+   * matchmake_found, then room_joined once everyone is in.
+   */
+  private async createAutoJoinedMatch(
+    queue: MatchmakingQueue,
+    tickets: MatchmakingTicket[]
+  ): Promise<void> {
+    // Take the tickets out of the queue synchronously, before any await.
+    for (const ticket of tickets) {
+      ticket.status = 'matched';
+      queue.tickets.delete(ticket.id);
+      this.playerTickets.delete(ticket.request.playerId);
+    }
+
+    let room;
+    try {
+      room = await this.roomManager.createRoom(queue.gameType, {
+        gameMode: queue.gameMode,
+        isPrivate: false,
+        fromMatchmaking: true,
+      });
+    } catch (error) {
+      this.log.error({ error, gameType: queue.gameType }, 'Failed to create auto-joined match');
+      return;
+    }
+
+    const joined: Client[] = [];
+    for (const ticket of tickets) {
+      ticket.roomId = room.id;
+      const client = this.getClient(ticket.request.playerId);
+      if (!client) continue; // disconnected while queued
+      try {
+        await this.roomManager.joinRoom(room.id, client);
+        joined.push(client);
+        // Sent right away, so players who join after this one arrive as
+        // player_joined — same ordering as a manual room_join.
+        client.send({
+          type: MessageType.MATCHMAKE_FOUND,
+          payload: { roomId: room.id, gameType: queue.gameType, gameMode: queue.gameMode },
+        });
+        client.send({
+          type: MessageType.ROOM_JOINED,
+          payload: { room: room.getInfo(), state: room.getState() },
+        });
+      } catch (error: any) {
+        this.log.warn({ playerId: client.id, error: error.message }, 'Matched player could not join');
+      }
+    }
+
+    if (joined.length === 0) {
+      room.dispose('No players joined');
+      return;
+    }
+
+    this.log.info(
+      { roomId: room.id, gameType: queue.gameType, playerCount: joined.length },
+      'Auto-joined match created'
+    );
   }
 
   /**

@@ -32,12 +32,16 @@ export enum MessageType {
   ROOM_ERROR = 'room_error',
   ROOM_STATE = 'room_state',
   ROOM_CLOSED = 'room_closed',
+  ROOM_UPDATE = 'room_update',
+  ROOM_UPDATED = 'room_updated',
 
   // Player Events
   PLAYER_JOINED = 'player_joined',
   PLAYER_LEFT = 'player_left',
   PLAYER_READY = 'player_ready',
   PLAYER_UPDATE = 'player_update',
+  PLAYER_DISCONNECTED = 'player_disconnected',
+  PLAYER_RECONNECTED = 'player_reconnected',
 
   // Game Events
   GAME_START = 'game_start',
@@ -135,6 +139,10 @@ export interface RoomInfo {
   hasPassword: boolean;
   createdAt: number;
   metadata?: Record<string, unknown>;
+  /** Short human-typable join code (rooms that opt in, e.g. panic_attack private rooms) */
+  joinCode?: string;
+  /** Connection id of the room's host (rooms that have one, e.g. panic_attack) */
+  hostId?: string;
 }
 
 export interface RoomListFilter {

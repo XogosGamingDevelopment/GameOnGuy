@@ -3,6 +3,7 @@
  * JWT round-trip, and production secret enforcement (Phase 13 hardening).
  */
 
+import jwt from 'jsonwebtoken';
 import { AuthService } from '../../src/auth/AuthService';
 
 // Control characters built programmatically (NUL, TAB, US, DEL)
@@ -139,6 +140,41 @@ describe('AuthService', () => {
       delete process.env.JWT_SECRET;
 
       expect(() => new AuthService()).not.toThrow();
+    });
+  });
+  describe('game tokens: display name', () => {
+    const SECRET = 'h'.repeat(64);
+    const sign = (claims: Record<string, unknown>) =>
+      jwt.sign({ sub: 'xogos-123', game: 'historical_conquest', ...claims }, SECRET, {
+        algorithm: 'HS256',
+        audience: 'gameondude',
+        expiresIn: 300,
+      });
+
+    it('uses the username sent alongside an id-only token (first name only)', async () => {
+      const auth = new AuthService();
+      auth.registerGameTokenSecret('historical_conquest', SECRET);
+      const result = await auth.authenticate({ token: sign({}), username: 'Ada Lovelace' });
+      expect(result).toMatchObject({
+        success: true,
+        userId: 'historical_conquest:xogos-123',
+        username: 'Ada',
+        game: 'historical_conquest',
+      });
+    });
+
+    it("prefers the token's name claim over the client-sent username", async () => {
+      const auth = new AuthService();
+      auth.registerGameTokenSecret('historical_conquest', SECRET);
+      const result = await auth.authenticate({ token: sign({ name: 'Jordan Smith' }), username: 'Mallory' });
+      expect(result.username).toBe('Jordan');
+    });
+
+    it('keeps website-account ids distinct from Xogos ids', async () => {
+      const auth = new AuthService();
+      auth.registerGameTokenSecret('historical_conquest', SECRET);
+      const site = await auth.authenticate({ token: sign({ sub: 'hc-456' }), username: 'Ben' });
+      expect(site.userId).toBe('historical_conquest:hc-456');
     });
   });
 });

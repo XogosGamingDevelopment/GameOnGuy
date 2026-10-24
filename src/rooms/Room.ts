@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { randomBytes } from 'crypto';
 import { Client } from '../core/Client';
 import { TypedEventEmitter } from '../core/EventEmitter';
 import {
@@ -31,12 +32,25 @@ interface RoomEvents {
   disposed: () => void;
 }
 
+/**
+ * A room refusal with a stable machine-readable code, sent to the client as
+ * room_error { message, code }. Clients should match on `code`, not `message`.
+ */
+export class RoomError extends Error {
+  constructor(message: string, public readonly code: string) {
+    super(message);
+    this.name = 'RoomError';
+  }
+}
+
 export interface RoomConstructorOptions extends Partial<RoomOptions> {
   id?: string;
   name?: string;
   creatorId?: string;
   /** If true, room was created from matchmaking timeout - spawn bot immediately */
   fromMatchmakingTimeout?: boolean;
+  /** If true, room was created by the matchmaker (server-internal; stripped from client room_create) */
+  fromMatchmaking?: boolean;
 }
 
 export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
@@ -46,6 +60,8 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
   public readonly gameMode?: string;
   public readonly createdAt: number;
   public readonly creatorId?: string;
+  /** Short join code, assigned by RoomManager when wantsJoinCode() is true */
+  public joinCode?: string;
 
   protected state: TState;
   protected players: Map<string, PlayerState> = new Map();
@@ -56,6 +72,13 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
   private tickInterval?: NodeJS.Timeout;
   private stateSequence: number = 0;
   private autoDisposeTimeout?: NodeJS.Timeout;
+
+  /** playerId -> secret a dropped player presents to take their seat back */
+  private rejoinTokens: Map<string, string> = new Map();
+  /** playerId -> timer that removes a disconnected player when the hold runs out */
+  private holdTimers: Map<string, NodeJS.Timeout> = new Map();
+  /** clientId -> playerId, for connections that rejoined an earlier player's seat */
+  private clientPlayers: Map<string, string> = new Map();
 
   protected readonly log;
 
@@ -145,30 +168,102 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
    */
   protected onMessage(client: Client, message: Message): void {}
 
+  /**
+   * Display name stored for a joining player. Override to control what other
+   * players see (e.g. hide names in stranger matches).
+   */
+  protected displayNameFor(client: Client): string {
+    return client.username ?? `Player${this.players.size + 1}`;
+  }
+
+  /**
+   * The player object other players receive in player_joined. Override to
+   * hide fields (userId, sessionId) from peers.
+   */
+  protected toPublicPlayer(player: PlayerState): unknown {
+    return player;
+  }
+
+  /** Whether RoomManager should assign this room a short join code. */
+  public wantsJoinCode(): boolean {
+    return false;
+  }
+
+  /** Whether this room appears in room_list. */
+  public isListed(): boolean {
+    return true;
+  }
+
+  /** Length of the join code RoomManager assigns (see wantsJoinCode). */
+  public joinCodeLength(): number {
+    return 5;
+  }
+
+  /**
+   * How long (ms) a dropped player's seat is held for a rejoin. 0 (default)
+   * removes them immediately, as before. When > 0, players get a rejoinToken
+   * in room_created/room_joined and peers see player_disconnected first.
+   */
+  protected rejoinHoldMs(): number {
+    return 0;
+  }
+
+  /**
+   * Whitelist the player info a client may attach (room_create / room_join
+   * `playerData`, player_ready). Return null to drop it (default: rooms carry
+   * no client-supplied player info).
+   */
+  protected sanitizePlayerData(_raw: unknown): Record<string, unknown> | null {
+    return null;
+  }
+
+  /** Where player info lives in a player_ready payload. */
+  protected playerDataFromReady(payload: any): unknown {
+    return payload?.playerData;
+  }
+
+  /** The player_ready broadcast. */
+  protected readyBroadcastPayload(player: PlayerState): Record<string, unknown> {
+    const payload: Record<string, unknown> = { playerId: player.id, ready: player.isReady };
+    if (Object.keys(player.data).length > 0) payload.data = player.data;
+    return payload;
+  }
+
+  /** Called when a player's connection drops and their seat is being held. */
+  protected onPlayerDisconnect(_player: PlayerState): void {}
+
+  /** Called when a held player rejoins. */
+  protected onPlayerReconnect(_player: PlayerState): void {}
+
+  /** The player id a connection plays as (differs from client.id after a rejoin). */
+  public playerIdOf(client: Client): string {
+    return this.clientPlayers.get(client.id) ?? client.id;
+  }
+
   // ============================================================================
   // Player Management
   // ============================================================================
 
-  public async addPlayer(client: Client, password?: string): Promise<PlayerState> {
+  public async addPlayer(client: Client, password?: string, playerData?: unknown): Promise<PlayerState> {
     // Check room state
     if (this.roomState !== RoomState.WAITING) {
-      throw new Error('Cannot join room: game already in progress');
+      throw new RoomError('Cannot join room: game already in progress', 'GAME_IN_PROGRESS');
     }
 
     // Check capacity
     if (this.players.size >= this.options.maxPlayers) {
-      throw new Error('Room is full');
+      throw new RoomError('Room is full', 'ROOM_FULL');
     }
 
     // Check password if private
     if (this.options.password && this.options.password !== password) {
-      throw new Error('Invalid room password');
+      throw new RoomError('Invalid room password', 'BAD_PASSWORD');
     }
 
     // Check custom validation
     const canJoin = this.canJoin(client);
     if (canJoin !== true) {
-      throw new Error(typeof canJoin === 'string' ? canJoin : 'Cannot join room');
+      throw new RoomError(typeof canJoin === 'string' ? canJoin : 'Cannot join room', 'CANNOT_JOIN');
     }
 
     // Create player state
@@ -176,17 +271,20 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
       id: client.id,
       sessionId: client.sessionId,
       userId: client.userId,
-      username: client.username ?? `Player${this.players.size + 1}`,
+      username: this.displayNameFor(client),
       isReady: false,
       isConnected: true,
       joinedAt: Date.now(),
       lastActivity: Date.now(),
-      data: {},
+      data: this.sanitizePlayerData(playerData) ?? {},
     };
 
     this.players.set(client.id, player);
     this.clients.set(client.id, client);
     client.setRoom(this.id);
+    if (this.rejoinHoldMs() > 0) {
+      this.rejoinTokens.set(client.id, randomBytes(24).toString('hex'));
+    }
 
     // Clear auto-dispose timeout
     if (this.autoDisposeTimeout) {
@@ -199,7 +297,7 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
     // Notify existing players
     this.broadcastExcept(client.id, {
       type: MessageType.PLAYER_JOINED,
-      payload: player,
+      payload: this.toPublicPlayer(player),
     });
 
     // Call hook
@@ -209,7 +307,9 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
     return player;
   }
 
-  public async removePlayer(clientId: string): Promise<void> {
+  public async removePlayer(id: string): Promise<void> {
+    // Accept a connection id or a player id (they differ after a rejoin).
+    const clientId = this.clientPlayers.get(id) ?? id;
     const player = this.players.get(clientId);
     const client = this.clients.get(clientId);
 
@@ -217,8 +317,11 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
 
     this.players.delete(clientId);
     this.clients.delete(clientId);
+    this.rejoinTokens.delete(clientId);
+    this.clearHoldTimer(clientId);
 
     if (client) {
+      this.clientPlayers.delete(client.id);
       client.setRoom(undefined);
     }
 
@@ -245,16 +348,115 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
     }
   }
 
-  public setPlayerReady(clientId: string, ready: boolean): void {
+  /**
+   * The connection dropped (as opposed to an explicit room_leave). Rooms with
+   * a rejoin hold keep the seat for rejoinHoldMs(); others remove the player.
+   */
+  public async handleDisconnect(client: Client): Promise<void> {
+    const playerId = this.playerIdOf(client);
+    // A connection that was already replaced by a rejoin no longer owns the seat.
+    if (this.clients.get(playerId) !== client) return;
+
+    const holdMs = this.rejoinHoldMs();
+    const player = this.players.get(playerId);
+    if (!player || holdMs <= 0 || this.roomState === RoomState.CLOSED) {
+      await this.removePlayer(playerId);
+      return;
+    }
+
+    player.isConnected = false;
+    this.clients.delete(playerId);
+    this.clientPlayers.delete(client.id);
+    client.setRoom(undefined);
+
+    this.log.info({ playerId, holdMs }, 'Player disconnected; holding seat');
+
+    this.broadcast({
+      type: MessageType.PLAYER_DISCONNECTED,
+      payload: { playerId, holdMs },
+    });
+    this.onPlayerDisconnect(player);
+
+    this.clearHoldTimer(playerId);
+    this.holdTimers.set(
+      playerId,
+      setTimeout(() => {
+        this.holdTimers.delete(playerId);
+        this.removePlayer(playerId).catch((error) => {
+          this.log.error({ error, playerId }, 'Failed to remove player after rejoin hold');
+        });
+      }, holdMs)
+    );
+  }
+
+  /**
+   * Put a connection back in the seat of the player the token belongs to.
+   * Only the same signed-in user may rejoin (the token alone is not enough).
+   */
+  public rejoin(client: Client, rejoinToken: unknown): PlayerState {
+    let playerId: string | undefined;
+    if (typeof rejoinToken === 'string') {
+      for (const [id, token] of this.rejoinTokens) {
+        if (token === rejoinToken) playerId = id;
+      }
+    }
+    const player = playerId ? this.players.get(playerId) : undefined;
+    if (!playerId || !player || player.userId !== client.userId) {
+      throw new RoomError('This rejoin link has expired. Please join the room again.', 'BAD_REJOIN_TOKEN');
+    }
+
+    // The old connection may not have noticed it dropped yet (busy Wi-Fi).
+    const old = this.clients.get(playerId);
+    if (old && old !== client) {
+      old.setRoom(undefined);
+      this.clientPlayers.delete(old.id);
+      old.close(4001, 'Rejoined from another connection');
+    }
+
+    this.clearHoldTimer(playerId);
+    this.clients.set(playerId, client);
+    if (client.id !== playerId) this.clientPlayers.set(client.id, playerId);
+    client.setRoom(this.id);
+    player.isConnected = true;
+    player.lastActivity = Date.now();
+
+    this.log.info({ playerId }, 'Player rejoined');
+
+    this.broadcastExcept(playerId, {
+      type: MessageType.PLAYER_RECONNECTED,
+      payload: { playerId },
+    });
+    this.onPlayerReconnect(player);
+
+    return player;
+  }
+
+  public getRejoinToken(playerId: string): string | undefined {
+    return this.rejoinTokens.get(playerId);
+  }
+
+  private clearHoldTimer(playerId: string): void {
+    const timer = this.holdTimers.get(playerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.holdTimers.delete(playerId);
+    }
+  }
+
+  public setPlayerReady(id: string, ready: boolean, payload?: unknown): void {
+    const clientId = this.clientPlayers.get(id) ?? id;
     const player = this.players.get(clientId);
     if (!player) return;
 
     player.isReady = ready;
     player.lastActivity = Date.now();
 
+    const data = this.sanitizePlayerData(this.playerDataFromReady(payload));
+    if (data) Object.assign(player.data, data);
+
     this.broadcast({
       type: MessageType.PLAYER_READY,
-      payload: { playerId: clientId, ready },
+      payload: this.readyBroadcastPayload(player),
     });
 
     this.emit('playerReady', clientId, ready);
@@ -405,7 +607,7 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
   // ============================================================================
 
   public handleMessage(client: Client, message: Message): void {
-    const player = this.players.get(client.id);
+    const player = this.players.get(this.playerIdOf(client));
     if (!player) return;
 
     player.lastActivity = Date.now();
@@ -415,7 +617,7 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
   }
 
   public handleGameAction(client: Client, action: any): void {
-    const player = this.players.get(client.id);
+    const player = this.players.get(this.playerIdOf(client));
     if (!player) return;
 
     if (this.roomState !== RoomState.IN_PROGRESS) {
@@ -427,7 +629,7 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
 
     const gameAction: GameAction = {
       type: action.type,
-      playerId: client.id,
+      playerId: player.id,
       data: action.data,
       timestamp: Date.now(),
       sequence: action.sequence,
@@ -478,6 +680,15 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
       hasPassword: !!this.options.password,
       createdAt: this.createdAt,
       metadata: this.options.metadata,
+      joinCode: this.joinCode,
+    };
+  }
+
+  /** getInfo() plus the roster — sent only to the room's own players (room_created / room_joined). */
+  public getMemberInfo(): RoomInfo & { players: unknown[] } {
+    return {
+      ...this.getInfo(),
+      players: Array.from(this.players.values()).map((p) => this.toPublicPlayer(p)),
     };
   }
 
@@ -499,19 +710,27 @@ export abstract class Room<TState = any> extends TypedEventEmitter<RoomEvents> {
     }, this.options.autoDisposeDelay);
   }
 
-  public dispose(): void {
-    this.log.info('Disposing room');
+  public dispose(reason: string = 'Room disposed', extra: Record<string, unknown> = {}): void {
+    // Idempotent: a room can be closed directly (e.g. its host left) and then
+    // again by a pending auto-dispose timer.
+    if (this.roomState === RoomState.CLOSED) return;
+
+    this.log.info({ reason }, 'Disposing room');
 
     this.stopTickLoop();
 
     if (this.autoDisposeTimeout) {
       clearTimeout(this.autoDisposeTimeout);
     }
+    this.holdTimers.forEach((timer) => clearTimeout(timer));
+    this.holdTimers.clear();
+    this.rejoinTokens.clear();
+    this.clientPlayers.clear();
 
     // Notify and disconnect all players
     this.broadcast({
       type: MessageType.ROOM_CLOSED,
-      payload: { reason: 'Room disposed' },
+      payload: { reason, ...extra },
     });
 
     this.clients.forEach((client) => {

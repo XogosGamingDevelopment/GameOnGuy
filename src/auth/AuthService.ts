@@ -16,7 +16,15 @@ interface AuthResult {
   userId?: string;
   username?: string;
   error?: string;
+  /** Set when the client presented a game token (see registerGameTokenSecret) */
+  game?: string;
 }
+
+/** Audience every game token must carry. */
+export const GAME_TOKEN_AUDIENCE = 'gameondude';
+/** Longest lifetime (iat → now) a game token may have; tokens are fetched right before connecting. */
+const GAME_TOKEN_MAX_AGE = '15m';
+const MAX_GAME_NAME_LENGTH = 20;
 
 /** Known placeholder secrets that must never be used in production. */
 const PLACEHOLDER_SECRETS = new Set([
@@ -29,10 +37,21 @@ const PLACEHOLDER_SECRETS = new Set([
 const MAX_GUEST_ID_LENGTH = 64;
 const MAX_USERNAME_LENGTH = 32;
 
+/** First name only: first word, letters/hyphen/apostrophe, capped. */
+function firstNameOnly(name: unknown): string {
+  return String(name ?? '')
+    .trim()
+    .split(/\s+/)[0]
+    .replace(/[^\p{L}'-]/gu, '')
+    .slice(0, MAX_GAME_NAME_LENGTH);
+}
+
 export class AuthService {
   private readonly jwtSecret: string;
   private readonly jwtExpiry: string;
   private sessions: Map<string, UserSession> = new Map();
+  /** gameType -> HS256 secret the game's own backend signs player tokens with */
+  private readonly gameTokenSecrets: Map<string, string> = new Map();
 
   private readonly log = logger.child({ component: 'AuthService' });
 
@@ -66,7 +85,7 @@ export class AuthService {
   public async authenticate(payload: AuthPayload): Promise<AuthResult> {
     // JWT Token authentication
     if (payload.token) {
-      return this.authenticateWithToken(payload.token);
+      return this.authenticateWithToken(payload.token, payload.username);
     }
 
     // Guest authentication
@@ -81,9 +100,72 @@ export class AuthService {
   }
 
   /**
+   * Let a game's own backend vouch for its players. The backend signs a
+   * short-lived HS256 JWT with this secret:
+   *   { sub, name?, game: <gameType>, aud: "gameondude", iat, exp }
+   * Players never sign in to Game On Dude! themselves. The secret is separate
+   * from JWT_SECRET, so it can only mint identities for this one game.
+   */
+  public registerGameTokenSecret(gameType: string, secret: string): void {
+    if (!secret || secret.length < 32) {
+      throw new Error(`Game token secret for ${gameType} must be at least 32 characters`);
+    }
+    this.gameTokenSecrets.set(gameType, secret);
+  }
+
+  public hasGameTokenSecret(gameType: string): boolean {
+    return this.gameTokenSecrets.has(gameType);
+  }
+
+  /**
+   * Authenticate with a game token (signed by a game's backend). The display
+   * name comes from the token's `name` claim; a game whose tokens carry only an
+   * id may send `username` alongside the token instead. Either way only the
+   * first name is kept.
+   */
+  private authenticateWithGameToken(token: string, game: string, clientName?: string): AuthResult {
+    const secret = this.gameTokenSecrets.get(game)!;
+    try {
+      const decoded = jwt.verify(token, secret, {
+        algorithms: ['HS256'],
+        audience: GAME_TOKEN_AUDIENCE,
+        maxAge: GAME_TOKEN_MAX_AGE,
+      }) as jwt.JwtPayload;
+
+      if (decoded.game !== game || typeof decoded.exp !== 'number') {
+        return { success: false, error: 'Invalid token' };
+      }
+
+      const sub = String(decoded.sub ?? '').replace(/[^\w.-]/g, '').slice(0, MAX_GUEST_ID_LENGTH);
+      if (!sub) {
+        return { success: false, error: 'Invalid token' };
+      }
+
+      return {
+        success: true,
+        userId: `${game}:${sub}`,
+        username: firstNameOnly(decoded.name ?? clientName),
+        game,
+      };
+    } catch (error: any) {
+      // Never log the token or its claims (student data).
+      this.log.warn({ game, error: error.name }, 'Game token authentication failed');
+      if (error.name === 'TokenExpiredError') {
+        return { success: false, error: 'Token expired' };
+      }
+      return { success: false, error: 'Invalid token' };
+    }
+  }
+
+  /**
    * Authenticate with JWT token.
    */
-  private authenticateWithToken(token: string): AuthResult {
+  private authenticateWithToken(token: string, clientName?: string): AuthResult {
+    const claimedGame = (jwt.decode(token) as jwt.JwtPayload | null)?.game;
+    if (typeof claimedGame === 'string' && this.gameTokenSecrets.has(claimedGame)) {
+      return this.authenticateWithGameToken(token, claimedGame, clientName);
+    }
+
     try {
       const decoded = jwt.verify(token, this.jwtSecret) as JWTPayload;
 
@@ -133,7 +215,8 @@ export class AuthService {
       .slice(0, MAX_USERNAME_LENGTH);
     const finalUsername = cleanedUsername || `Guest_${finalGuestId.slice(-6)}`;
 
-    this.log.info({ guestId: finalGuestId, username: finalUsername }, 'Guest authenticated');
+    // Usernames are not logged (child-directed games use guest auth in testing).
+    this.log.info({ guestId: finalGuestId }, 'Guest authenticated');
 
     return {
       success: true,
