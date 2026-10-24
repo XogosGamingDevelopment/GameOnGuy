@@ -1665,7 +1665,7 @@ The contact form uses **Mailtrap** for transactional email delivery.
 **Model Used:** Claude Opus 5.5 (claude-opus-5-5)
 **Date:** October 23, 2026
 
-**In one paragraph:** Turbo Type asked for classroom multiplayer (several servers, player car data, lobby settings, DNF, longer grace, own player id, short codes, `ROOM_FULL`, rejoin). Historical Conquest (HC) asked for private games and a roster. While investigating we found prod autoscaling had dropped live races, and pinned prod to one instance. We read both partners' client code instead of guessing, built everything as generic opt-in room features, stood up a shared test server, had both teams pass a checklist there, deployed to prod (both teams then confirmed prod from their live sites), added refusal logging + CloudWatch alarms, and turned the test server off. **Prod = `phase18-alerts-261023d`. Nothing from Phases 16–18 is committed to git.**
+**In one paragraph:** Turbo Type asked for classroom multiplayer (several servers, player car data, lobby settings, DNF, longer grace, own player id, short codes, `ROOM_FULL`, rejoin). Historical Conquest (HC) asked for private games and a roster. While investigating we found prod autoscaling had dropped live races, and pinned prod to one instance. We read both partners' client code instead of guessing, built everything as generic opt-in room features, stood up a shared test server, had both teams pass a checklist there, deployed to prod (both teams then confirmed prod from their live sites), added refusal logging + CloudWatch alarms, and turned the test server off. **Prod = `phase18-alerts-261023d`. Phases 16–18 are committed on branch `phases-16-18` (not merged to `main`, not pushed).**
 
 #### 1. Prod autoscaling incident (found and fixed)
 - EB's default trigger (NetworkOut > 6 MB / 5 min) scaled prod 1→2 at **8:16 AM Central Oct 23** during Turbo Type's 6-player races, then scaled in at 8:22 by **terminating the original instance**, dropping every connected player. Rooms live in memory per instance (Redis not configured), so two instances also split rooms ("Room not found", empty room_list). Turbo Type confirmed races were running 8:02–8:25.
@@ -1746,7 +1746,7 @@ The contact form uses **Mailtrap** for transactional email delivery.
 - **Claude Code permission gates:** in auto mode the classifier blocked `aws acm request-certificate` and the copy of a secret into prod. The user switched out of auto mode to approve the test-server build step by step. A chat "go ahead" doesn't satisfy that gate.
 - Reading a partner's client before answering saved a round-trip each time (Turbo Type's car/DNF/grace formats were already being sent; HC's "spec" was in `net.js`).
 - Both teams' clients detect the new features per room, so the same client build ran on old and new prod — this made the prod switch risk-free for them. Encourage future integrators to do the same.
-- **Not committed to git** (Phases 16–18). See RESUME HERE.
+- **Committed Oct 24** on branch `phases-16-18`: `86fad54` GeoTagRoom.ts, `60313c5` platform, `901430b` Panic Attack, `fb536fc` Phase 18 rooms + tests, `8f6ea80` docs. Verified in a clean worktree: 342/342 tests; the only type errors are in `src/database/` (see RESUME HERE → git).
 
 ---
 
@@ -1763,7 +1763,7 @@ The contact form uses **Mailtrap** for transactional email delivery.
 - **Waiting on the user:** the email address for the refusal alarms (SNS topic has no subscriber yet — Phase 18 §8).
 - **Waiting on Turbo Type:** item 1 (token sign-in on the test server) + a real-Chromebook rejoin test; later, word that their prod token endpoint is live (then copy `TYPING_RACE_TOKEN_SECRET` to prod with user approval).
 - **Waiting on HC:** word that they're ready to test token sign-in (email them before setting `GAMEON_HC_SECRET` on their backend).
-- **Git:** Phases 16–18 are deployed but NOT committed. HEAD (`02289af`) does not even compile on its own (it imports the never-committed `GeoTagRoom.ts`).
+- **Git:** Phases 16–18 are committed on branch **`phases-16-18`** (5 commits on top of `02289af`; not merged to `main`, not pushed — ask the user). Still uncommitted: the older WIP (`src/bots/`, `src/database/`, `package.json`/lock, `db/init.sql`, `.ebextensions/03-https.config`, website). **Because of that WIP, a clean checkout still fails `tsc` in `src/database/`:** the working tree (= prod) moved the DB layer from PostgreSQL (`pg`) to MySQL (`mysql2`) and changed `package.json`, but git still has the `pg` versions. Commit that WIP (database + package.json/lock together) to make git match prod.
 
 **Server Status:** ✅ DEPLOYED & WORKING
 **Production URL:** `wss://multiplayer.gameonguy.com/ws` (health: `https://multiplayer.gameonguy.com/health` → `{ status, clients, rooms, version, uptimeSeconds }`)
@@ -1773,7 +1773,7 @@ The contact form uses **Mailtrap** for transactional email delivery.
 **historical_conquest:** relay room with private games (6-letter codes, unlisted), roster, playerData whitelist, `to`, 60 s rejoin, origin allow-list, guests allowed; tokens wired but not enabled.
 **panic_attack:** host-relay room, 7 players/room + Huddle phrases (Phases 16–17), signed tokens required; working well per the user.
 **Server-side bots:** OFF for all games (opt-in since Phase 14).
-**GitHub `main` HEAD:** `02289af` (BUILD.md for Phase 15; code = `45fa9cf`; Phase 14 = `db5f02e`, Phase 13 = `4975912`). **Phases 16–18 NOT committed.**
+**Git:** `main` = `02289af` (Phase 15). Branch **`phases-16-18`** = `8f6ea80` (Phases 16–18, local only). Older WIP still uncommitted.
 **Tests:** 342/342 PASSING (`npm test`)
 **Build:** clean (`npm run build`)
 **Rollback labels:** `phase18-classroom-261023c` (Phase 18 without refusal logging/HC token support — safe), `panic-7p-huddle-chat-261021-201040` (Phase 17 — safe, but removes everything both teams now use: codes, hidden rooms, rejoin, origin limits; only if Phase 18 is broken), `panic-attack-room-261015-063636` (Phase 16), `hc-relay-outage-fix-260723-121049` (Phase 15 — no Panic Attack room), `hc-bots-opt-in-260721-114103` (pre-Phase-15 — ⚠️ contains the TurnBasedRoom infinite-loop bug behind the July 21 outage; emergency only), `sec-hardening-260721-100650` (pre-Phase-14). Rolling back does not undo the ASG pin or log streaming (those are environment settings).
@@ -1964,7 +1964,7 @@ If any of these are red, fix that before adding scope. (Do NOT run `test-bot-pro
 
 - **🔔 Remind the user first:** the Xogos admin "Multiplayer alerts" dashboard card they asked for (Phase 18 §8). Mostly Xogos platform (PHP) work, modelled on the coin alerts in `../0. Entire Xogos Platform/backend/api/admin/bank/`.
 - **🟠 Alert email:** subscribe the user's chosen address to SNS topic `gameon-alerts`, have them click the confirmation, then fire a test alarm (Phase 18 §8). Until then the four alarms notify nobody.
-- **🟠 Commit Phases 16–18 to git.** Everything on prod since Oct 15 is uncommitted, and HEAD doesn't compile on its own. Commit in reviewable chunks, separate from the older WIP:
+- **🟠 Git follow-through.** Phases 16–18 were committed Oct 24 on branch `phases-16-18` in these chunks (done — kept for reference). Next: ask the user whether to merge into `main` and push to GitHub; then commit the older WIP (database MySQL switch + `package.json`/lock first — that's what keeps a clean checkout from compiling; then `src/bots/`, `db/init.sql`, `.ebextensions/03-https.config`, website):
   1. `src/games/xogos/GeoTagRoom.ts` (HEAD already imports it).
   2. Phase 16–17 Panic Attack: `src/games/xogos/PanicAttackRoom.ts`, `tests/games/PanicAttackRoom.test.ts`, `tests/games/PanicAttackSamples.test.ts`, `tests/fixtures/panic-attack-message-samples.json`, `test-panic-attack-production.js`.
   3. Phase 16–18 platform: `src/core/{Server,Client,types}.ts`, `src/rooms/{Room,RoomManager}.ts`, `src/auth/AuthService.ts`, `src/matchmaking/MatchmakingService.ts`, `src/games/index.ts`, `src/games/xogos/index.ts`, `src/index.ts`.
@@ -2330,7 +2330,7 @@ The prioritized list lives in **RESUME HERE → "What the Next Developer Should 
 ### 🟡 Important
 1. **Remind the user** about the Xogos admin "Multiplayer alerts" dashboard card.
 2. **Alert email subscription** for SNS topic `gameon-alerts` (waiting on the user's address).
-3. **Commit Phases 16–18** to git (HEAD doesn't compile on its own).
+3. **Git:** merge/push branch `phases-16-18` (user's call); commit the older WIP so a clean checkout compiles.
 4. **Turbo Type:** token sign-in test (test server) + Chromebook rejoin test; later, prod tokens.
 5. **HC:** token sign-in when they're ready (email them before touching their backend).
 6. **Prod DATABASE_URL credentials rejected by RDS** (since Phase 15).
@@ -2350,7 +2350,7 @@ The prioritized list lives in **RESUME HERE → "What the Next Developer Should 
 *Production Server: wss://multiplayer.gameonguy.com/ws*
 *Production Version: phase18-alerts-261023d (Phases 13–18 live)*
 *Test Server: wss://test.multiplayer.gameonguy.com/ws (env gameonguy-test — OFF; template gameonguy-test-config)*
-*GitHub `main` HEAD: 02289af — Phase 15 docs (code 45fa9cf; Phase 14 = db5f02e, Phase 13 = 4975912). Phases 16–18 NOT committed.*
+*Git: `main` = 02289af (Phase 15); branch `phases-16-18` = Phases 16–18 (local, not pushed). Older WIP (database/bots/package.json/website) uncommitted.*
 *342 Unit Tests Passing (= the prod build)*
 *8 Game Types Registered (Lightning Round, Historical Conquest [relay], GeoTag, Typing Race, Panic Attack + panic_attack_test [host-relay], TimeQuest, Number Munchers)*
 *Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md (AI-assistant version: website/public/gameon-multiplayer-ai-integration-guide.md — not updated for Phase 18)*
