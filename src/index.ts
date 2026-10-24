@@ -29,6 +29,7 @@ import { LightningRoundRoom } from './games/xogos/LightningRoundRoom';
 import { HistoricalConquestRelayRoom } from './games/xogos/HistoricalConquestRelayRoom';
 import { GeoTagRoom } from './games/xogos/GeoTagRoom';
 import { TypingRaceRoom } from './games/xogos/TypingRaceRoom';
+import { PanicAttackRoom } from './games/xogos/PanicAttackRoom';
 import { GameOnGames } from './games';
 import logger from './core/Logger';
 import { startAdminServer } from './admin/AdminServer';
@@ -236,11 +237,7 @@ function registerGames(server: GameOnServer) {
     GameOnGames.NUMBER_MUNCHERS
   );
 
-  server.roomManager.registerGame(
-    GameOnGames.PANIC_ATTACK.type,
-    RealTimeMovementRoom,
-    GameOnGames.PANIC_ATTACK
-  );
+  registerPanicAttack(server);
 
   // Historical Conquest: The Digital — RELAY room (July 2026, per Xogos
   // Gaming's request). The client is lockstep (full game logic on every
@@ -267,7 +264,119 @@ function registerGames(server: GameOnServer) {
     GameOnGames.TYPING_RACE
   );
 
+  registerStudentGamePolicies(server);
+
   log.info('All game types registered');
+}
+
+/**
+ * Turbo Type and Historical Conquest (Xogos Gaming, Oct 2026) are played by
+ * K-12 students: only their own sites may connect, and no IPs or names are
+ * logged. On the test server (GAMEON_TEST_SERVER=true) their local dev
+ * addresses are allowed too.
+ *
+ * Turbo Type players may sign in with a token from Turbo Type's backend
+ * (TYPING_RACE_TOKEN_SECRET — the same value as GAMEON_TURBO_SECRET on
+ * Turbo-type-env). TYPING_RACE_REQUIRE_TOKEN=true refuses guests; leave it
+ * off until Turbo Type's production endpoint is live. Historical Conquest works
+ * the same way with HISTORICAL_CONQUEST_TOKEN_SECRET /
+ * HISTORICAL_CONQUEST_REQUIRE_TOKEN (not set yet — HC isn't ready).
+ */
+const TURBO_TYPE_ORIGINS = [
+  'https://turbotype.myxogos.com',
+  'https://main.d3hnzwbzrpohxp.amplifyapp.com',
+];
+const TURBO_TYPE_DEV_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+const HISTORICAL_CONQUEST_ORIGINS = [
+  'https://historicalconquest.org',
+  'https://www.historicalconquest.org',
+  'https://game.historicalconquest.org',
+  'https://academy.historicalconquest.org',
+  'https://master.d17xq1hcij90qc.amplifyapp.com',
+];
+const HISTORICAL_CONQUEST_DEV_ORIGINS = ['http://localhost:8000', 'http://127.0.0.1:8000'];
+
+function registerStudentGamePolicies(server: GameOnServer) {
+  const testServer = process.env.GAMEON_TEST_SERVER === 'true';
+
+  const turboSecret = process.env.TYPING_RACE_TOKEN_SECRET;
+  if (turboSecret) {
+    server.authService.registerGameTokenSecret(GameOnGames.TYPING_RACE.type, turboSecret);
+  }
+  const requireTurboToken = process.env.TYPING_RACE_REQUIRE_TOKEN === 'true';
+  if (requireTurboToken && !turboSecret) {
+    log.warn('TYPING_RACE_REQUIRE_TOKEN is set but TYPING_RACE_TOKEN_SECRET is not — typing_race will refuse all players');
+  }
+
+  server.setGameAccessPolicy(GameOnGames.TYPING_RACE.type, {
+    ...(requireTurboToken ? { requireGameToken: GameOnGames.TYPING_RACE.type } : {}),
+    allowedOrigins: testServer ? [...TURBO_TYPE_ORIGINS, ...TURBO_TYPE_DEV_ORIGINS] : TURBO_TYPE_ORIGINS,
+    childDirected: true,
+  });
+
+  // HC tokens carry only the player id (sub); the first name comes from the
+  // `username` HC's client sends alongside the token.
+  const hcSecret = process.env.HISTORICAL_CONQUEST_TOKEN_SECRET;
+  if (hcSecret) {
+    server.authService.registerGameTokenSecret(GameOnGames.HISTORICAL_CONQUEST.type, hcSecret);
+  }
+  const requireHcToken = process.env.HISTORICAL_CONQUEST_REQUIRE_TOKEN === 'true';
+  if (requireHcToken && !hcSecret) {
+    log.warn('HISTORICAL_CONQUEST_REQUIRE_TOKEN is set but HISTORICAL_CONQUEST_TOKEN_SECRET is not — historical_conquest will refuse all players');
+  }
+
+  server.setGameAccessPolicy(GameOnGames.HISTORICAL_CONQUEST.type, {
+    ...(requireHcToken ? { requireGameToken: GameOnGames.HISTORICAL_CONQUEST.type } : {}),
+    allowedOrigins: testServer
+      ? [...HISTORICAL_CONQUEST_ORIGINS, ...HISTORICAL_CONQUEST_DEV_ORIGINS]
+      : HISTORICAL_CONQUEST_ORIGINS,
+    childDirected: true,
+  });
+}
+
+/**
+ * Panic Attack (Xogos Gaming, Oct 2026): host-authoritative relay for a
+ * K-12 browser game. Players never sign in to Game On Dude! — Panic Attack's
+ * backend signs a short-lived token (PANIC_ATTACK_TOKEN_SECRET) that the game
+ * passes in `auth`. panic_attack_test is the pre-launch test type: same room,
+ * also accepts guest auth and localhost origins.
+ */
+const PANIC_ATTACK_ORIGINS = [
+  'https://panicattack.myxogos.com',
+  'https://main.dwi7f9whnjmat.amplifyapp.com',
+];
+
+function registerPanicAttack(server: GameOnServer) {
+  const panicSecret = process.env.PANIC_ATTACK_TOKEN_SECRET;
+  if (panicSecret) {
+    server.authService.registerGameTokenSecret(GameOnGames.PANIC_ATTACK.type, panicSecret);
+  } else {
+    log.warn('PANIC_ATTACK_TOKEN_SECRET not set — panic_attack will refuse all players (panic_attack_test still works)');
+  }
+
+  const quickMatch = {
+    timeout: 120000, // a lone player gets matchmake_timeout after 2 min
+    fillCountdownMs: 20000, // 20 s after the 2nd player joins...
+    minMatchPlayers: 2,
+    maxMatchPlayers: 7, // ...or right away with 7 (6 monsters + Panic)
+    autoJoinMatched: true,
+  };
+
+  server.roomManager.registerGame(GameOnGames.PANIC_ATTACK.type, PanicAttackRoom, GameOnGames.PANIC_ATTACK);
+  server.setGameAccessPolicy(GameOnGames.PANIC_ATTACK.type, {
+    requireGameToken: GameOnGames.PANIC_ATTACK.type,
+    allowedOrigins: PANIC_ATTACK_ORIGINS,
+    childDirected: true,
+  });
+  server.matchmaking.configureGameMatchmaking(GameOnGames.PANIC_ATTACK.type, quickMatch);
+
+  server.roomManager.registerGame(GameOnGames.PANIC_ATTACK_TEST.type, PanicAttackRoom, GameOnGames.PANIC_ATTACK_TEST);
+  server.setGameAccessPolicy(GameOnGames.PANIC_ATTACK_TEST.type, {
+    allowedOrigins: [...PANIC_ATTACK_ORIGINS, 'http://localhost:*', 'http://127.0.0.1:*'],
+    childDirected: true,
+  });
+  server.matchmaking.configureGameMatchmaking(GameOnGames.PANIC_ATTACK_TEST.type, quickMatch);
 }
 
 /**

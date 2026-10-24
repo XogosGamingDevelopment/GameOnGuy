@@ -23,11 +23,13 @@ const WebSocket = require('ws');
 
 const SERVER_URL =
   process.env.GAMEON_URL || process.env.SERVER_URL || 'wss://multiplayer.gameonguy.com/ws';
+// historical_conquest only accepts HC's own sites (student privacy, Phase 18).
+const ORIGIN = process.env.ORIGIN || 'https://game.historicalconquest.org';
 const TIMEOUT_MS = 30000;
 
 function connect(name) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(SERVER_URL);
+    const ws = new WebSocket(SERVER_URL, { origin: ORIGIN });
     const log = [];
     const listeners = [];
     let clientId = null;

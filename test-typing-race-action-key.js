@@ -12,12 +12,14 @@
 
 const WebSocket = require('ws');
 
-const SERVER_URL = process.env.SERVER_URL || 'wss://multiplayer.gameonguy.com/ws';
+const SERVER_URL = process.env.GAMEON_URL || process.env.SERVER_URL || 'wss://multiplayer.gameonguy.com/ws';
+// typing_race only accepts Turbo Type's own sites (student privacy, Phase 18).
+const ORIGIN = process.env.ORIGIN || 'https://turbotype.myxogos.com';
 const TIMEOUT_MS = 30000;
 
 function connect(name) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(SERVER_URL);
+    const ws = new WebSocket(SERVER_URL, { origin: ORIGIN });
     const log = [];
     const listeners = [];
     let clientId = null;

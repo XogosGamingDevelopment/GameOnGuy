@@ -17,6 +17,8 @@ const WebSocket = require('ws');
 
 // Override with GAMEON_URL=ws://localhost:3000/ws to test locally
 const SERVER_URL = process.env.GAMEON_URL || 'wss://multiplayer.gameonguy.com/ws';
+// historical_conquest only accepts HC's own sites (student privacy, Phase 18).
+const ORIGIN = process.env.ORIGIN || 'https://game.historicalconquest.org';
 
 console.log('='.repeat(60));
 console.log('HC NO-BOT TEST (bots must NOT spawn for historical_conquest)');
@@ -25,7 +27,7 @@ console.log(`Connecting to: ${SERVER_URL}`);
 console.log(`Time: ${new Date().toISOString()}`);
 console.log('='.repeat(60));
 
-const ws = new WebSocket(SERVER_URL);
+const ws = new WebSocket(SERVER_URL, { origin: ORIGIN });
 let startTime;
 let sawStarted = false;
 

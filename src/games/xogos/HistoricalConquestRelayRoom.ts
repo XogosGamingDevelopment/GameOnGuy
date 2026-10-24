@@ -33,10 +33,17 @@
  * clients apply their action locally before sending; an echo would risk
  * double-application). Set echoToSender: true in room options to include it.
  *
- * Room flow: create via room_create (private room codes work via room_list /
- * room_join — the roster comes from room_joined / player_joined /
- * player_left). Min 2 / max 4 players; no server-side bots; matchmaking not
- * required.
+ * Targeted send: a game_action with `to: <playerId>` goes to that one player
+ * only (e.g. the host resending mp_state to a player who rejoined).
+ *
+ * Room flow: create via room_create. Public rooms (the Waiting Room) are
+ * listed in room_list. Private rooms (options.isPrivate: true) get a 6-letter
+ * join code, are never listed, and are joined by code or full room id. The
+ * roster comes from room_created / room_joined (room.players) plus
+ * player_joined / player_left. A dropped player's seat is held for 60 s
+ * (rejoinToken); after that the others get player_left (a forfeit).
+ * playerData carries only uid, rating, wins, losses. Min 2 / max 4 players;
+ * no server-side bots; matchmaking not required.
  */
 
 import { Room, RoomConstructorOptions } from '../../rooms/Room';
@@ -59,6 +66,8 @@ export class HistoricalConquestRelayRoom extends Room<HCRelayState> {
   constructor(gameType: string, options: HistoricalConquestRelayRoomOptions = {}) {
     super(gameType, {
       ...options,
+      // The default name embeds the room id; never hand that out for a private game.
+      name: options.isPrivate ? 'Private game' : options.name,
       // No server-side simulation; the tick loop is irrelevant.
       tickRate: options.tickRate ?? 1,
       minPlayers: options.minPlayers ?? 2,
@@ -77,12 +86,56 @@ export class HistoricalConquestRelayRoom extends Room<HCRelayState> {
     return { actionsRelayed: 0 };
   }
 
+  // --------------------------------------------------------------------------
+  // ROOM CONFIGURATION
+  // --------------------------------------------------------------------------
+
+  public wantsJoinCode(): boolean {
+    return this.options.isPrivate;
+  }
+
+  public joinCodeLength(): number {
+    return 6;
+  }
+
+  public isListed(): boolean {
+    return !this.options.isPrivate;
+  }
+
+  protected rejoinHoldMs(): number {
+    return 60 * 1000;
+  }
+
+  /** Exactly what HC asked to carry — nothing else about the player. */
+  protected sanitizePlayerData(raw: unknown): Record<string, unknown> | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const { uid, rating, wins, losses } = raw as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    if (typeof uid === 'string' && /^[\w.:-]{1,64}$/.test(uid)) data.uid = uid;
+    if (typeof rating === 'number' && Number.isFinite(rating)) data.rating = Math.round(rating);
+    if (typeof wins === 'number' && Number.isFinite(wins)) data.wins = Math.max(0, Math.round(wins));
+    if (typeof losses === 'number' && Number.isFinite(losses)) data.losses = Math.max(0, Math.round(losses));
+    return Object.keys(data).length > 0 ? data : null;
+  }
+
+  protected toPublicPlayer(player: PlayerState): unknown {
+    return {
+      id: player.id,
+      username: player.username,
+      isReady: player.isReady,
+      joinedAt: player.joinedAt,
+      connected: player.isConnected,
+      data: player.data,
+    };
+  }
+
   /**
    * Override the base handler so actions are relayed as soon as players are
    * in the room, instead of being rejected with "Game not in progress".
    */
   public handleGameAction(client: Client, action: any): void {
-    const player = this.players.get(client.id);
+    const senderId = this.playerIdOf(client);
+    const player = this.players.get(senderId);
     if (!player) return;
 
     player.lastActivity = Date.now();
@@ -95,7 +148,7 @@ export class HistoricalConquestRelayRoom extends Room<HCRelayState> {
     const relayPayload = {
       type: actionName,
       action: actionName,
-      playerId: client.id,
+      playerId: senderId,
       username: player.username,
       data,
       timestamp: Date.now(),
@@ -104,17 +157,21 @@ export class HistoricalConquestRelayRoom extends Room<HCRelayState> {
 
     this.state.actionsRelayed++;
 
-    if (this.echoToSender) {
+    const to = action?.to;
+    if (typeof to === 'string') {
+      // Targeted: only that player (silently dropped if they aren't connected).
+      this.sendToPlayer(to, { type: MessageType.GAME_ACTION, payload: relayPayload });
+    } else if (this.echoToSender) {
       this.broadcast({ type: MessageType.GAME_ACTION, payload: relayPayload });
     } else {
-      this.broadcastExcept(client.id, {
+      this.broadcastExcept(senderId, {
         type: MessageType.GAME_ACTION,
         payload: relayPayload,
       });
     }
 
     this.log.debug(
-      { playerId: client.id, action: actionName, players: this.players.size },
+      { playerId: senderId, action: actionName, players: this.players.size },
       'Relayed game action'
     );
   }
