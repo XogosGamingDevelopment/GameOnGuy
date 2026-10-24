@@ -2,7 +2,7 @@
 
 **Website**: [www.gameonguy.com](https://www.gameonguy.com)
 
-> **For AI Developers / next session**: skip the "Current Status (As of December 2024)" table below — it's a historical snapshot. The accurate current state lives in **`## 🚀 RESUME HERE - CURRENT PROJECT STATE`** further down (just past the Phase 14 session entry). Read that section first, then come back up here if you need historical context.
+> **For AI Developers / next session**: skip the "Current Status (As of December 2024)" table below — it's a historical snapshot. The accurate current state lives in **`## 🚀 RESUME HERE - CURRENT PROJECT STATE`** further down (just past the latest session entry, Phase 18). Read that section first, then come back up here if you need historical context.
 >
 > Before deploying anything: read "⚠️ READ THIS BEFORE YOU DEPLOY ANYTHING" inside the RESUME HERE block. `eb deploy` does NOT work here — using it ships broken HEAD to prod.
 >
@@ -1531,25 +1531,256 @@ The contact form uses **Mailtrap** for transactional email delivery.
     `aws elasticbeanstalk restart-app-server --environment-name
     gameonguy-production --profile eb-cli --region us-east-1`.
 
+### October 2026 Session (Phase 16) — Panic Attack host-relay room (`panic_attack`)
+**Model Used:** Claude Opus 5.5 (claude-opus-5-5)
+**Date:** October 15, 2026
+
+- **Trigger:** Letter from the Panic Attack team (Xogos — React/three.js browser game,
+  K-12, 2–6 players, host's browser runs the match) asking to move multiplayer onto
+  Game On Dude!, with 12 questions. User directive: students must NOT sign in to
+  Game On — it is embedded in Panic Attack (press "Quick Match" or share a code).
+
+- **New `src/games/xogos/PanicAttackRoom.ts`** (registered for `panic_attack` AND
+  `panic_attack_test`): host = first player in; guest `game_action` → host ONLY
+  (`payload.to` ignored); host → everyone, or `payload.to: <playerId>` → one
+  player; relayed shape `{ type, action, playerId, fromHost, data, timestamp,
+  sequence }`, no self-echo; host `start` locks joins, `end` unlocks (rematch);
+  host leaving → `room_closed { reason: "host_left" }`; guest leaving → just
+  `player_left`. Server-checked quick-chat (`type: "chat"`, phrase/who/where
+  whitelist, private rooms only, 1.2 s/player, fields rebuilt from whitelist,
+  broadcast to all with `serverChecked: true`). Names: first name in private rooms,
+  `null` in Quick Match; `player_joined`/roster never expose userId/sessionId.
+  Max 6. `player_ready` never starts a server loop.
+
+- **Platform features added (generic, opt-in):**
+  - **Game tokens** (`AuthService.registerGameTokenSecret`): a game's backend signs
+    HS256 `{ sub, name?, game, aud:"gameondude", exp }` (≤15 min old) with its own
+    secret. Panic secret = EB env `PANIC_ATTACK_TOKEN_SECRET` (64 hex chars, set in
+    this deploy; never printed — read it with `aws elasticbeanstalk
+    describe-configuration-settings --application-name GameOnGuy --environment-name
+    gameonguy-production --profile eb-cli --region us-east-1 --query
+    "ConfigurationSettings[0].OptionSettings[?OptionName=='PANIC_ATTACK_TOKEN_SECRET'].Value"
+    --output text`). userId = `panic_attack:<sub>`.
+  - **Game access policies** (`server.setGameAccessPolicy`): `requireGameToken`,
+    `allowedOrigins` (`:*` = any port), `childDirected` (no IPs / names / userIds
+    logged). Checked on room_create, room_join, matchmake_request.
+  - **Join codes** (RoomManager): rooms with `wantsJoinCode()` get a 5-consonant
+    code (no vowels → can't spell words); `room_join { joinCode }`; 10 wrong codes
+    per minute per connection → throttled. Rooms with `isListed() === false`
+    never appear in room_list.
+  - **Lobby-fill matchmaking** (`fillCountdownMs`/`minMatchPlayers`/
+    `maxMatchPlayers`/`autoJoinMatched`): countdown at min players,
+    `matchmake_update` broadcasts, start at max immediately, server-side join in
+    queue order (first queued = host). Panic: 20 s, 2–6, 2-min solo timeout.
+  - Room base hooks: `displayNameFor`, `toPublicPlayer`, idempotent
+    `dispose(reason, extra)`. Client room_create can no longer set server-only
+    options (`fromMatchmaking`, `creatorId`, `id`). Guest auth log no longer
+    includes usernames.
+
+- **Tests:** `tests/games/PanicAttackRoom.test.ts` (40). Full suite **279/279**.
+  Build clean.
+- **Smoke test `test-panic-attack-production.js`** (their exact wire shapes):
+  access rules, codes, unlisted, routing incl. forged guest `to`, secrets,
+  chat, start-lock, real rates (2 KB snaps 12.5/s + guests 15/s, zero loss/
+  throttling), host-left, Quick Match countdown. Default `panic_attack_test`;
+  `GAME_TYPE=panic_attack PANIC_ATTACK_TOKEN_SECRET=...` signs real tokens.
+- **Deployed** ✅ `panic-attack-room-261015-063636` (Ready/Green). Live: Panic smoke
+  test PASS for both types; HC relay, typing_race (both shapes) PASS.
+- **Letter to Panic Attack:** delivered in the terminal (user asked for no .md).
+- **Not committed to git** this session (user to decide).
+- **Follow-up (same day):** Panic Attack reported their client + token endpoint built
+  and tested on `panic_attack_test` (22/22 private, 5/5 Quick Match). Their exact token
+  format (HS256, aud gameondude, string sub, first name, 5-min exp) verified accepted
+  on prod from both origins; bad age/audience/claim refused. **Key handed over
+  server-to-server:** copied into EB env `panicattack-api-prod` (same AWS account) as
+  `GAMEON_PANIC_SECRET` — values verified equal, never printed. Panic API env
+  stayed Green on `app-262`. At that time their prod `/api/gameon-token` still
+  returned 404 (endpoint not yet deployed on their side). If the key is ever
+  rotated, update BOTH env vars.
+- **Follow-up 2 (same day):** Panic Attack sent 58 captured wire frames
+  (`tests/fixtures/panic-attack-message-samples.json`, copied from
+  `../2. Panic Attack/docs/gameon-message-samples.json`). New
+  `tests/games/PanicAttackSamples.test.ts` (18 tests) replays every frame they sent
+  through PanicAttackRoom using the captured connection ids and asserts the delivered
+  payloads/recipients match what their client received. All pass — no server change.
+  Suite **297/297**. Their prod `/health` did not yet report `"gameon": true`.
+
+### October 2026 Session (Phase 17) — Panic Attack: 7-player rooms + Hidden Worries Huddle chat
+**Model Used:** Claude Opus 5.5 (claude-opus-5-5)
+**Date:** October 20–22, 2026
+
+- **Session start (Oct 20) — state audit:** prod was healthy on the Phase 16 build;
+  297/297 tests; build clean. Found BUILD.md stale (RESUME HERE header still said
+  239 tests / HEAD `45fa9cf`; footer + games table still Phase 15) and that
+  **git HEAD does not compile on its own**: `src/games/xogos/index.ts` at HEAD
+  exports `GeoTagRoom`, but `GeoTagRoom.ts` has never been committed. Both
+  fixed/recorded below; the git part is still open.
+- **Trigger (Oct 21):** Panic Attack letter: rooms up to 7 (6 monsters + Panic), six new
+  quick-chat phrases, and "many private rooms at once must keep working."
+- **⚠️ The Panic Attack team (or their agent) edited THIS working tree directly**
+  (Oct 21 13:38: `PanicAttackRoom.ts`, `src/games/index.ts`, the room test). Their
+  edits were reviewed by compiling to a scratch dir and diffing against the
+  Oct 20 `dist/` — only the requested changes, nothing else. They can also read
+  our EB environment (shared AWS account). Review any unexplained working-tree
+  changes before deploying.
+- **Changes:** `PANIC_MAX_PLAYERS` 6→7; `PANIC_ATTACK`/`PANIC_ATTACK_TEST`
+  `maxPlayers` 6→7; `PANIC_CHAT_PHRASES` += `sus`, `wru`, `vote` (take `who`),
+  `notme`, `proof`, `skip` (no args); Quick Match `maxMatchPlayers` 6→7 in
+  `src/index.ts` (the one edit their copy missed). No room-count cap exists.
+- **Tests:** +8 (phrases, 5 concurrent full private rooms isolated, Quick Match
+  starts at 7 not 6). Suite **305/305**. Smoke test `test-panic-attack-production.js`
+  gained "Two full 7-player private rooms at once" + "Quick Match fills to 7".
+- **Their "7th player gets no answer" was a client bug:** probed prod directly —
+  the server always sent `room_error { message: "Room is full" }`; their client
+  didn't display it. They now show "Room is full", "already started" and
+  "Room not found" to players (live on their side).
+- **Deploy incident (process, not code):** the AWS deploy steps were blocked by the
+  Claude Code permission gate (production deploys need the user's explicit
+  "deploy it" — a forwarded partner letter asking for a rollout does not count).
+  A draft "it's live" reply had already gone out, so Panic Attack wrote back
+  twice reporting prod still on the Oct 15 build (they were right — no new
+  application version had been uploaded). The user then said "deploy it".
+  **Lessons: never draft a "live" letter until prod smoke tests pass; say
+  plainly at the top of the reply when a deploy did NOT happen.**
+- **Deployed** ✅ `panic-7p-huddle-chat-261021-201040` (Ready/Green/Ok, Oct 21
+  ~8:10 PM Central). Same create-zip + AWS CLI path.
+- **Verified live:** `test-panic-attack-production.js` ALL PASS for both
+  `panic_attack_test` and `panic_attack` (signed tokens, real origin):
+  room_created says 7, 7 join, 8th gets "Room is full"; all six Huddle phrases
+  echo with `serverChecked: true`; two full 7-player rooms stay isolated; Quick
+  Match starts instantly at 7. HC relay + both typing_race tests PASS.
+  - The first prod run had one false FAIL ("all 7 in one Quick Match room").
+    Diagnosed: all 7 were in one room; the check wrongly assumed the 7th
+    socket created is the last to join (join order follows network arrival,
+    and each `room_joined` shows the roster at that player's join). Check
+    fixed to compare room ids + max roster size; re-run passed.
+- **Reply to Panic Attack** ("live now", with the version label and verified
+  results, cleared them to switch the phrases on) was drafted in the terminal
+  for the user to send — **confirm with the user that it went out.**
+- **Memory notes added** (`~/.claude/projects/.../memory/`):
+  `no-live-letter-before-deploy.md`, `partners-edit-working-tree.md`.
+- **Not committed to git** (Phases 16 + 17 still uncommitted; see RESUME HERE).
+
+### October 2026 Session (Phase 18) — Classroom rooms for Turbo Type + Historical Conquest; prod pinned to 1 instance; test server; refusal alerts
+**Model Used:** Claude Opus 5.5 (claude-opus-5-5)
+**Date:** October 23, 2026
+
+**In one paragraph:** Turbo Type asked for classroom multiplayer (several servers, player car data, lobby settings, DNF, longer grace, own player id, short codes, `ROOM_FULL`, rejoin). Historical Conquest (HC) asked for private games and a roster. While investigating we found prod autoscaling had dropped live races, and pinned prod to one instance. We read both partners' client code instead of guessing, built everything as generic opt-in room features, stood up a shared test server, had both teams pass a checklist there, deployed to prod (both teams then confirmed prod from their live sites), added refusal logging + CloudWatch alarms, and turned the test server off. **Prod = `phase18-alerts-261023d`. Nothing from Phases 16–18 is committed to git.**
+
+#### 1. Prod autoscaling incident (found and fixed)
+- EB's default trigger (NetworkOut > 6 MB / 5 min) scaled prod 1→2 at **8:16 AM Central Oct 23** during Turbo Type's 6-player races, then scaled in at 8:22 by **terminating the original instance**, dropping every connected player. Rooms live in memory per instance (Redis not configured), so two instances also split rooms ("Room not found", empty room_list). Turbo Type confirmed races were running 8:02–8:25.
+- **Fix (user approved):** `aws:autoscaling:asg` MinSize=1, MaxSize=1 on `gameonguy-production`. **Never raise MaxSize until rooms are shared across instances** — scale up (instance type), not out. Memory note: `prod-pinned-single-instance`.
+- Separate unexplained 5-minute "Severe" target-group event at 5:48 AM Central Oct 23 — not investigated.
+
+#### 2. Partners and decisions
+- All partner letters were written in the terminal; the user sends them (no .md copies this session).
+- **Both Turbo Type and HC are child-directed** (user decision) → origin allow-lists + no IPs/names in logs, like Panic Attack.
+- **Students sign in with Xogos credentials** via game tokens from each game's own backend (same mechanism as Panic Attack). Guest sign-in stays on until each team says otherwise.
+- We read the clients directly: Turbo Type `../3. Turbo Type/turbo-type-racing/src/services/{gameOnClient,gameOnConfig}.js`, `src/hooks/useMultiplayer.js`; HC `../1. Historical Conquest/HistoricalConquest - CardPlay/net.js` (+ `mp-lobby.js`, `mp-game.js`). This replaced HC's long-awaited "spec" — HC confirmed their action list is complete: `mp_hello, mp_start, mp_input, mp_offer, mp_accept, mp_end, mp_state` (+ `mp_resume`, `mp_catchup`, `mp_resumed` added for rejoin catch-up), all pass-through.
+- **Partner backends live in this AWS account:** Turbo Type = EB env `Turbo-type-env` (app `turbo-type`); HC = EB env `Historical-conquest-api-env` (app `historical-conquest-api`, behind `dmgxprmju47eh.cloudfront.net`). Secrets are handed over server-to-server, never by email.
+- Panic Attack: user confirmed working well (the Phase 17 "confirm the reply went out" item is closed).
+
+#### 3. Platform changes (generic, opt-in per room — other games unchanged)
+- **Error codes:** `RoomError(message, code)`; every `room_error` is `{ message, code }`: `ROOM_FULL`, `ROOM_NOT_FOUND`, `GAME_IN_PROGRESS`, `CANNOT_JOIN`, `BAD_PASSWORD`, `BAD_REJOIN_TOKEN`, `TOO_MANY_ATTEMPTS`, `ACCESS_DENIED`. Game errors on `error`: `RACE_IN_PROGRESS`, `NOT_HOST`, `BAD_METADATA`.
+- **Own id + roster:** `room_created` = `getMemberInfo()` (room info + `players` via `toPublicPlayer`) + `playerId` + `rejoinToken?`. `room_joined` = `{ room: getMemberInfo(), state, playerId, rejoinToken?, rejoined? }`. `room_list` unchanged (never players).
+- **Player data:** `playerData` on `room_create` / `room_join` / `player_ready` → `sanitizePlayerData()` whitelist (default: dropped) → `player.data`.
+- **Seat hold / rejoin:** `rejoinHoldMs()` (default 0 = old behavior). A socket drop calls `Room.handleDisconnect` (Server → `roomManager.disconnectFromRoom`; explicit `room_leave` still removes at once) → peers get `player_disconnected { playerId, holdMs }`. `room_join { roomId|joinCode, rejoinToken }` from the **same userId** restores the seat under the **old playerId** (`clientPlayers` map: new clientId → old playerId) → peers get `player_reconnected`. A stale socket that hasn't noticed the drop is closed with 4001. Hold expiry → normal `removePlayer` → `player_left`. **In rooms that hold seats, always use `room.playerIdOf(client)`, never `client.id`.**
+- **Join codes:** `joinCodeLength()` (default 5; Turbo/HC 6). Consonants only.
+- **`server.stop()`** now stops the matchmaking loop (it leaked an interval; Jest hung).
+- **`/health`** = `{ status, clients, rooms, version, uptimeSeconds }` (counts only). `version` comes from `dist/build-info.json`, written by `create-zip.js` from `LABEL` (EB's own version manifest isn't readable by the app on AL2023). **Set LABEL before zipping** — the deploy recipe below does.
+- **Refusal logging:** every `room_error` goes through `Server.refuseRoom()`, which logs one warn line `{ gameType, code, msg: "Room refused" }` — game and code only (promised to HC: no ids/names/IPs).
+- **Game tokens without a name:** if a token has no `name` claim, the first word of the `username` sent alongside it (`auth { token, username }`) is used (HC's request). Token `name` still wins (Turbo Type puts the first name in the token).
+
+#### 4. `typing_race` (TypingRaceRoom rewritten; same wire shapes as before)
+- Accepts Turbo Type's exact formats: `carId` from `player_ready { ready, carId }` / `playerData` / `progress` data → `data.carId` on every player list (+ flat `carId` in the `player_ready` broadcast). Only `carId` is kept.
+- `race_setup` extras (`typingMode`, `length`, `difficulty`, `cars`, … ≤ 8 KB) spread into `state_update.state`; reserved keys can't be overwritten.
+- `finish { dnf: true, position }` → keeps the real position, counts as done, ranked after every finisher, doesn't start the grace window. `finishGraceMs` capped at 5 min (Turbo sends 180000).
+- Every room gets a 6-letter code and is **hidden from room_list unless created with `isPrivate: false`** (Turbo Type's client was updated to omit it for classroom rooms).
+- `room_update { metadata }` — host only, not during a race → everyone gets `room_updated { metadata }` (merged, ≤ 2 KB).
+- Late joiners after `race_setup` → `RACE_IN_PROGRESS`; only rejoins allowed.
+- 90 s seat hold; a racer who doesn't return is a DNF at their last position (leavers are kept in the standings).
+- No usernames in the "Typing race ended" log.
+
+#### 5. `historical_conquest` (HistoricalConquestRelayRoom)
+- `isPrivate: true` → 6-letter code, never listed, name `"Private game"` (never contains the room id). Joinable by code or full room id (their invite links). Public Waiting Room (`metadata: { hcWaitingRoom: true }`) unchanged and listed.
+- Roster `{ id, username, isReady, joinedAt, connected, data }` (no userId/sessionId).
+- `playerData` whitelist is exactly `uid, rating, wins, losses`.
+- `payload.playerId` on relayed actions is server-stamped (HC now uses it for seat checks instead of `data.by`). `game_action { to: "<playerId>" }` sends to one player.
+- 60 s seat hold; after that peers get `player_left` (HC treats it as a forfeit).
+- Display name stays the client-sent `username` (first name only; HC answer A).
+
+#### 6. Access, privacy and tokens (`registerStudentGamePolicies` in `src/index.ts`)
+- Origins — Turbo Type: `https://turbotype.myxogos.com`, `https://main.d3hnzwbzrpohxp.amplifyapp.com`. HC: `https://historicalconquest.org`, `https://www.historicalconquest.org`, `https://game.historicalconquest.org`, `https://academy.historicalconquest.org`, `https://master.d17xq1hcij90qc.amplifyapp.com`. `GAMEON_TEST_SERVER=true` adds `localhost:5173` (Turbo) and `localhost:8000` (HC). Both `childDirected`.
+- **Turbo Type tokens:** env `TYPING_RACE_TOKEN_SECRET` (= `GAMEON_TURBO_SECRET` on `Turbo-type-env`, set this session, fingerprint-verified). Tokens: HS256 `{ sub, name, game: "typing_race", aud: "gameondude", iat, exp }`. `TYPING_RACE_REQUIRE_TOKEN=true` refuses guests. **On prod: the secret is NOT set yet** (copying it was blocked by the Claude Code auto-mode classifier, "Secret-Store Writes"). Not needed until Turbo Type's prod endpoint is live (needs their Xogos registration for `XOGOS_JWT_SECRET` + HTTPS on their backend). The value is stored in the saved template `gameonguy-test-config` (read it with `describe-configuration-settings --application-name GameOnGuy --template-name gameonguy-test-config`) and on `Turbo-type-env`.
+- **HC tokens (wired, not enabled):** env `HISTORICAL_CONQUEST_TOKEN_SECRET` / `HISTORICAL_CONQUEST_REQUIRE_TOKEN`. HC's side: setting **`GAMEON_HC_SECRET`** on `Historical-conquest-api-env`. **⚠️ Email HC before setting it** (saving restarts their API for 1–2 min; they choose a quiet time), then confirm afterwards without the value. HC ids: `sub` = `xogos-<id>` (Xogos accounts) or `hc-<account number>` (website accounts), stable per player, fresh token before every connect/reconnect; `username` = first name next to the token. Agreed rollout: test server → accept tokens on prod with guests still allowed → require only when HC says so.
+
+#### 7. Test server (built, used by both teams, now OFF)
+- Env `gameonguy-test` (t3.small, own ALB, Min/Max 1), fixed CNAME `gameonguy-test.us-east-1.elasticbeanstalk.com`, address **`wss://test.multiplayer.gameonguy.com/ws`** (Route 53 CNAME in zone `Z00675751DBXICQLZ61BJ`; ACM cert `32e9fb13-1578-47d6-890e-1a526019e6f2`, set on the 443 listener via API option settings, which override `.ebextensions/03-https.config`). Env vars: `GAMEON_TEST_SERVER=true`, its own `JWT_SECRET`, `TYPING_RACE_TOKEN_SECRET`; no `DATABASE_URL`, no `PANIC_ATTACK_TOKEN_SECRET` (`panic_attack_test` works there, `panic_attack` refuses all). Log streaming on.
+- **Terminated Oct 23 evening (user request)** after both teams confirmed prod. Cert, DNS record and the saved template `gameonguy-test-config` (refreshed just before shutdown; holds the env vars incl. secrets) are kept — they cost nothing. ~$1.10/day while on.
+- **Turn ON (~10–15 min):** `aws elasticbeanstalk create-environment --application-name GameOnGuy --environment-name gameonguy-test --cname-prefix gameonguy-test --template-name gameonguy-test-config --version-label <label> --profile eb-cli --region us-east-1`, then `GAMEON_URL=wss://test.multiplayer.gameonguy.com/ws node test-classroom-production.js`. (Right after a terminate, AWS may need a few minutes to release the CNAME prefix.)
+- **Turn OFF:** refresh the template first if settings changed (delete + `create-configuration-template --template-name gameonguy-test-config --environment-id <id>`), then `aws elasticbeanstalk terminate-environment --environment-name gameonguy-test --profile eb-cli --region us-east-1`. **Never run terminate against `gameonguy-production`.**
+- **Still open on the test server (turn it on when they ask):** Turbo Type item 1 (token sign-in from localhost + Amplify) and a real-Chromebook rejoin test; HC's future token sign-in test.
+
+#### 8. Refusal alerts (user's "option 3")
+- Prod log streaming on: StreamLogs=true, 7-day retention, DeleteOnTerminate=false. App log group: `/aws/elasticbeanstalk/gameonguy-production/var/log/web.stdout.log`. Lines are prefixed `Oct 24 ... web[pid]: ` before the JSON, so use **text** filter patterns (`"Room refused" "historical_conquest" "BAD_REJOIN_TOKEN"`), not JSON patterns.
+- Metric filters `gameon-{historical_conquest,typing_race}-{ACCESS_DENIED,BAD_REJOIN_TOKEN}` → namespace `GameOn`, metric `RoomRefused_<game>_<code>` (verified with `test-metric-filter`). Alarms `GameOn <game> <code> spike`: Sum > 10 per 900 s, missing data = not breaching → SNS topic `arn:aws:sns:us-east-1:016461466120:gameon-alerts`. ≈ $0.40/month.
+- **⏳ The topic has NO email subscriber yet** — waiting on the user for the address (`aws sns subscribe --topic-arn <arn> --protocol email --notification-endpoint <addr>`; the recipient must click the confirmation). Until then alarms fire silently. After subscribing, send a test with `aws cloudwatch set-alarm-state --alarm-name "GameOn historical_conquest ACCESS_DENIED spike" --state-value ALARM --state-reason test`.
+- When an HC alarm fires, tell HC what we saw and when (they asked; promised).
+- **User asked to be reminded next session:** build a "Multiplayer alerts" card on the Xogos admin dashboard (memory note `remind-xogos-admin-multiplayer-alerts`). Only add student ids after token sign-in is on, sent straight to Xogos, and only once both teams agree.
+- Git Bash rewrites `/aws/...` arguments as Windows paths — prefix those AWS commands with `MSYS_NO_PATHCONV=1`.
+
+#### 9. Versions this session (all in the GameOnGuy application)
+| Label | Contents | Where it ran |
+|---|---|---|
+| `phase18-classroom-261023` | first Phase 18 build | test only |
+| `phase18-classroom-261023b` | + `/health` rooms/version (version showed `1.0.0` — EB manifest unreadable) | test only |
+| `phase18-classroom-261023c` | + build-stamped version | test, then **prod** (both teams' checks) |
+| `phase18-alerts-261023d` | + refusal logging, HC token support, username-with-token | test, then **prod — CURRENT** |
+
+#### 10. Tests, smoke tests, docs
+- Unit/integration suite **342/342** (+37 this session): `tests/games/TypingRaceClassroom.test.ts`, `tests/games/HistoricalConquestPrivate.test.ts`, `tests/integration/ClassroomRooms.test.ts` (real GameOnServer + ws, incl. a real drop + rejoin and `/health`), 3 new AuthService token-name tests.
+- New smoke test **`test-classroom-production.js`** (28 checks, both games' exact shapes). The existing typing_race and HC scripts now send an allowed `Origin` (override with `ORIGIN=`) and accept `GAMEON_URL`. All prod smoke tests passed after both prod deploys, including Panic `panic_attack` with signed tokens.
+- `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` updated (room_created/joined fields, codes, playerData, rejoin, error-code table, new message types, both game sections; fixed the old false claim that private rooms were never listed, and Panic 2–6 → 2–7). It was sent to both teams.
+
+#### 11. Process notes and lessons
+- **Claude Code permission gates:** in auto mode the classifier blocked `aws acm request-certificate` and the copy of a secret into prod. The user switched out of auto mode to approve the test-server build step by step. A chat "go ahead" doesn't satisfy that gate.
+- Reading a partner's client before answering saved a round-trip each time (Turbo Type's car/DNF/grace formats were already being sent; HC's "spec" was in `net.js`).
+- Both teams' clients detect the new features per room, so the same client build ran on old and new prod — this made the prod switch risk-free for them. Encourage future integrators to do the same.
+- **Not committed to git** (Phases 16–18). See RESUME HERE.
+
 ---
 
 ## 🚀 RESUME HERE - CURRENT PROJECT STATE
 
-### Current State (July 23, 2026 — end of Phase 15)
+### Current State (October 23, 2026 — end of Phase 18)
 
-**Server Status:** ✅ DEPLOYED & WORKING (outage of July 21–23 root-caused and fixed in Phase 15)
-**Production URL:** `wss://multiplayer.gameonguy.com/ws`
-**Production version:** `hc-relay-outage-fix-260723-121049` (env `gameonguy-production`, Ready/Green/Ok — TurnBasedRoom hang fix + historical_conquest relay room live)
-**historical_conquest:** RELAY room since Phase 15 (lockstep client; pure relay, no turn gating, min 2/max 4, no bots). Old simulated `HistoricalConquestRoom` unregistered but kept as reference.
+**🔔 Before anything else, remind the user:** they asked to be reminded to build a "Multiplayer alerts" card on the Xogos admin dashboard (Phase 18 §8; memory note `remind-xogos-admin-multiplayer-alerts`).
+
+**Where we left off:**
+- Phase 18 (classroom rooms for Turbo Type + Historical Conquest, refusal logging + alarms) is **live on prod and confirmed by both teams** from their live sites. All prod smoke tests pass.
+- **Prod is pinned to exactly 1 instance** (MinSize=MaxSize=1) since the Oct 23 scale-in dropped live races. Keep it that way.
+- **Test server `gameonguy-test` is OFF** (terminated Oct 23; saved template `gameonguy-test-config` brings it back in ~15 min — Phase 18 §7).
+- **Waiting on the user:** the email address for the refusal alarms (SNS topic has no subscriber yet — Phase 18 §8).
+- **Waiting on Turbo Type:** item 1 (token sign-in on the test server) + a real-Chromebook rejoin test; later, word that their prod token endpoint is live (then copy `TYPING_RACE_TOKEN_SECRET` to prod with user approval).
+- **Waiting on HC:** word that they're ready to test token sign-in (email them before setting `GAMEON_HC_SECRET` on their backend).
+- **Git:** Phases 16–18 are deployed but NOT committed. HEAD (`02289af`) does not even compile on its own (it imports the never-committed `GeoTagRoom.ts`).
+
+**Server Status:** ✅ DEPLOYED & WORKING
+**Production URL:** `wss://multiplayer.gameonguy.com/ws` (health: `https://multiplayer.gameonguy.com/health` → `{ status, clients, rooms, version, uptimeSeconds }`)
+**Production version:** `phase18-alerts-261023d` (env `gameonguy-production`, Ready/Green, ASG 1/1, CloudWatch log streaming on).
+**Test server:** `wss://test.multiplayer.gameonguy.com/ws` — OFF (env terminated; cert, DNS and template kept).
+**typing_race:** classroom rooms (hidden by default, 6-letter codes), carId, `room_update`, DNF, 90 s rejoin, origin allow-list, guests allowed; Turbo tokens accepted only once the secret is on prod.
+**historical_conquest:** relay room with private games (6-letter codes, unlisted), roster, playerData whitelist, `to`, 60 s rejoin, origin allow-list, guests allowed; tokens wired but not enabled.
+**panic_attack:** host-relay room, 7 players/room + Huddle phrases (Phases 16–17), signed tokens required; working well per the user.
 **Server-side bots:** OFF for all games (opt-in since Phase 14).
-**GitHub `main` HEAD:** `45fa9cf` — "Phase 15: fix TurnBasedRoom hang (July 21 outage) + historical_conquest relay room" (pushed to origin/main; Phase 14 = `db5f02e`, Phase 13 = `4975912`)
-**Tests:** 239/239 PASSING (`npm test`)
+**GitHub `main` HEAD:** `02289af` (BUILD.md for Phase 15; code = `45fa9cf`; Phase 14 = `db5f02e`, Phase 13 = `4975912`). **Phases 16–18 NOT committed.**
+**Tests:** 342/342 PASSING (`npm test`)
 **Build:** clean (`npm run build`)
-**Rollback labels:** `hc-bots-opt-in-260721-114103` (pre-Phase-15 — ⚠️ contains the TurnBasedRoom infinite-loop bug that caused the July 21 outage; only roll back to it in an emergency and expect HC games to be able to wedge the server), `sec-hardening-260721-100650` (pre-Phase-14)
+**Rollback labels:** `phase18-classroom-261023c` (Phase 18 without refusal logging/HC token support — safe), `panic-7p-huddle-chat-261021-201040` (Phase 17 — safe, but removes everything both teams now use: codes, hidden rooms, rejoin, origin limits; only if Phase 18 is broken), `panic-attack-room-261015-063636` (Phase 16), `hc-relay-outage-fix-260723-121049` (Phase 15 — no Panic Attack room), `hc-bots-opt-in-260721-114103` (pre-Phase-15 — ⚠️ contains the TurnBasedRoom infinite-loop bug behind the July 21 outage; emergency only), `sec-hardening-260721-100650` (pre-Phase-14). Rolling back does not undo the ASG pin or log streaming (those are environment settings).
 
-**📄 Document to share with external game developers:** `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` — fully rewritten and source-verified in Phase 13. Keep it in sync whenever the wire protocol changes; it is the public face of the platform.
+**📄 Document to share with external game developers:** `docs/MULTIPLAYER_INTEGRATION_GUIDE.md` — source-verified; updated in Phase 18. Keep it in sync whenever the wire protocol changes; it is the public face of the platform.
 
-**Games registered (7):** Lightning Round, **Historical Conquest (relay room since Phase 15)**, GeoTag, Typing Race, Number Munchers, Panic Attack, TimeQuest (the last three are stub registrations against base classes; full game logic not yet implemented).
+**Games registered (8):** Lightning Round, Historical Conquest (relay), GeoTag, Typing Race, Panic Attack + panic_attack_test (host-relay), Number Munchers, TimeQuest (the last two are stub registrations against base classes).
 
 ---
 
@@ -1557,20 +1788,26 @@ The contact form uses **Mailtrap** for transactional email delivery.
 
 **`eb deploy` is broken for this repo. Do not use it.** It deploys git HEAD via `git archive`, but HEAD is intentionally behind the working tree (devs deploy from the working tree directly via a pre-built zip). Even though Phases 11–15 each committed their own new work, lots of in-tree changes remain uncommitted by design. Running `eb deploy` would ship git HEAD (potentially regressing prod) AND would fail to compile on the EB instance anyway because the Node platform here doesn't install devDependencies, so `tsc` isn't available remotely.
 
-**The deploy path that actually works** (verified this session):
+**Two pre-flight rules (Phase 17):**
+- **Production deploys need the user's explicit go-ahead** ("deploy it"). Claude Code's permission gate blocks the S3 upload / `create-application-version` / `update-environment` steps otherwise, and a partner letter asking for a rollout doesn't count. Never tell a partner something is live until steps 5–7 below have run and passed.
+- **The zip ships the whole working tree, and partners (the Panic Attack team) have edited it directly.** Before building, list what changed since the last deploy (`find src -newermt "<last deploy time>"`, or `find src -newer gameondude-server-deploy.zip` for changes since the last zip) and make sure every change is one you expect.
+- **Test on the test server first** for anything partner-facing (turn it on — Phase 18 §7), deploy the *same label* to prod only after the partner confirms, and re-run every smoke test on prod.
+
+**The deploy path that actually works** (verified again in Phase 18 — four builds, two prod deploys):
 
 ```bash
 # 1. Build locally (devDeps available; produces dist/)
 npm run build && npm test
 
-# 2. Bundle the pre-built artifact
-node create-zip.js
+# 2. Pick the version label, then bundle the pre-built artifact
+#    (LABEL is stamped into dist/build-info.json and shown on /health as "version")
+LABEL="my-change-$(date +%y%m%d-%H%M%S)"
+LABEL="$LABEL" node create-zip.js
 # → produces gameondude-server-deploy.zip (~23 MB) containing
 #   dist/, node_modules/, package.json, package-lock.json, Procfile,
 #   .ebextensions/, .platform/, db/
 
 # 3. Upload to the EB application bucket
-LABEL="my-change-$(date +%y%m%d-%H%M%S)"
 BUCKET="elasticbeanstalk-us-east-1-016461466120"
 KEY="GameOnGuy/${LABEL}.zip"
 aws s3 cp gameondude-server-deploy.zip "s3://${BUCKET}/${KEY}" \
@@ -1596,24 +1833,27 @@ aws elasticbeanstalk describe-environments \
 # 7. Smoke test (see "Smoke tests" below)
 ```
 
-The deploy this session used label `tr-typing-race-260528-153300`. The AWS account is `016461466120` and the EB CLI profile is `eb-cli` (already configured locally).
+The most recent deploy used label `phase18-alerts-261023d` (Phase 18). The AWS account is `016461466120` and the EB CLI profile is `eb-cli` (already configured locally).
 
 **Why this matters for git:** because deploys come from the working tree, the git index does NOT reflect production state and prod state does NOT reflect git HEAD. Don't trust either alone — always look at the working tree + the EB version label.
 
 ---
 
-### 🌐 The two endpoints (don't confuse them)
+### 🌐 The endpoints (don't confuse them)
 
 | URL | Status |
 |---|---|
-| `wss://multiplayer.gameonguy.com/ws` | ✅ Use this. Custom domain, ACM cert, TLS terminates at the ALB. |
+| `wss://multiplayer.gameonguy.com/ws` | ✅ Production. Custom domain, ACM cert, TLS terminates at the ALB. |
+| `wss://test.multiplayer.gameonguy.com/ws` | Test server (env `gameonguy-test`) — **OFF by default**; turn on only while a partner is testing (Phase 18 §7). Allows the partners' localhost dev origins. |
 | `ws://gameonguy-production.eba-pmb36kcs.us-east-1.elasticbeanstalk.com/ws` | Plaintext only. The cert is bound to `multiplayer.gameonguy.com`, so `wss://` to this hostname fails with `WRONG_PRINCIPAL`. Hand this hostname to integrators and they will burn a day debugging. |
 
 Health check, useful when you want to confirm prod is alive without spinning up a client:
 ```bash
 curl https://multiplayer.gameonguy.com/health
-# → {"status":"ok","clients":N}
+# → {"status":"ok","clients":N,"rooms":N,"version":"<deployed label>","uptimeSeconds":N}
 ```
+
+**Student games refuse connections without their own site's `Origin`** (`typing_race`, `historical_conquest`, `panic_attack`). Our Node smoke tests send an allowed Origin; any ad-hoc script must too, or it gets `ACCESS_DENIED`.
 
 ---
 
@@ -1621,6 +1861,8 @@ curl https://multiplayer.gameonguy.com/health
 
 | Script | What it does |
 |---|---|
+| `node test-classroom-production.js` | **Phase 18 canonical test** (~40 s). 28 checks in Turbo Type's and HC's exact shapes: origin refusal, hidden rooms + 6-letter codes, playerId/roster/rejoinToken, carId everywhere, race_setup extras, room_update + NOT_HOST, RACE_IN_PROGRESS, a real socket drop + rejoin with the same playerId and progress, DNF ranking, ROOM_FULL; HC private games unlisted, playerData whitelist, server-stamped sender, targeted `to`. `GAMEON_URL=wss://test.multiplayer.gameonguy.com/ws` for the test server. |
+| `node test-panic-attack-production.js` | **Panic Attack test** (~60 s; Phase 16, extended Phase 17). Their exact wire shapes against `panic_attack_test`: access rules, codes, routing, chat incl. the six Huddle phrases, real rates, host-left, Quick Match countdown, **two full 7-player rooms at once (8th refused, no leaks), Quick Match fills to 7**. Add `GAME_TYPE=panic_attack PANIC_ATTACK_TOKEN_SECRET=<from EB env>` to test the real type with signed tokens (run both after any Panic change). Supports `GAMEON_URL`. Note: shares the public `panic_attack_test` Quick Match queue, so a Panic Attack tester queuing at the same moment can skew the Quick Match checks — re-run before assuming a bug. |
 | `node test-hc-relay-production.js` | **Phase 15 canonical HC test.** Two guests: room_create → room_list → room_join, relays all 3 payload shapes to peers (no turn gating, no setup_phase, no self-echo, zero rejections), then both disconnect and a probe confirms the server is still responsive (July-21 outage regression). Supports `GAMEON_URL=ws://localhost:3000/ws`. |
 | `node test-hc-no-bot-production.js` | Phase 14. Verifies solo `historical_conquest` matchmaking gets `matchmake_timeout` at ~20 s and NO server bot joins (bots are opt-in and OFF). Supports `GAMEON_URL=ws://localhost:3000/ws` for local runs. |
 | `node test-bot-production.js` | ⚠️ LEGACY — asserts the OLD bot-spawn behavior, so it now "fails" by design. Only useful again if a game re-enables server-side bot fill. |
@@ -1633,53 +1875,46 @@ If any of these fail after a deploy, you've broken something — roll back via `
 
 ### What's working on production right now
 
-**Historical Conquest RELAY room** (Phase 15): `room_create`/`room_list`/`room_join` with private codes; every `game_action` relayed immediately to the other players (shape-agnostic: `payload.type`, `payload.action`, or flat; data verbatim); no setup phase, no turn order, no self-echo (opt-in via `echoToSender`); min 2 / max 4.
+Full details of the Phase 18 behavior are in the Phase 18 session entry and in `docs/MULTIPLAYER_INTEGRATION_GUIDE.md`.
 
-**Historical Conquest matchmaking** (Phase 14, optional for HC): pairs two humans; solo players get `matchmake_timeout` at ~20 s and the HC: The Digital client runs its own bot locally. **Server-side bots are OFF** (opt-in framework retained — see Phase 14 entry).
+**Shared platform (Phase 18):** `room_error { message, code }` codes; `playerId` + roster in `room_created` / `room_joined`; per-game `playerData` whitelists; per-game seat hold with `rejoinToken` (`player_disconnected` / `player_reconnected`); 5- or 6-letter consonant join codes; refusal logging (game + code only) feeding CloudWatch alarms; `/health` with rooms + version.
 
-**Historical Conquest bot loop** (Phase 9 — RETIRED in Phase 14; kept below for reference, code preserved in `src/bots/games/historical-conquest/`):
-- Join: `servercount2` → `playerinfo` → `rc`
-- Game start: `startgame` → `rfol` → `lhp` + `ds`
-- Turn: `splb` → `ppch` + `ds` → `pet`
-- Accepts: `ppcc` → `aph`; `piac` → `ftah`
-- Combat: `cr` → `fdac` + `ac`
-- CIA + Sinking of Titanic targeting via `hlc`
-- Row-based attack/defense calc, land capture/giveaway tracking
+**Typing Race (`typing_race`, Turbo Type):**
+- Action name in `payload.type` or `payload.action`, data nested or flat (Phase 12 lenient parsing). Turbo Type now sends the canonical `payload.type`.
+- `race_setup` (host only; extras like `typingMode`/`length`/`difficulty`/`cars` passed through), `progress`, `finish` (`{ time }` or `{ dnf: true, position }`) → `state_update`; `game_end { results: { standings } }` when everyone is done or `finishGraceMs` (default 15 s, max 5 min) after the first real finisher.
+- Classroom rooms: 6-letter code, hidden from `room_list` unless `isPrivate: false`; `room_update` (host, not mid-race); late joiners → `RACE_IN_PROGRESS`; 90 s rejoin hold, non-returners become DNF.
+- `carId` everywhere players are listed. Unknown action names get a real `error`.
+- Only Turbo Type's two sites may connect; guests allowed; tokens accepted once `TYPING_RACE_TOKEN_SECRET` is on prod (not yet).
 
-**Typing Race relay** (Phase 11 + Phase 12 hardening):
-- `room_create { gameType: "typing_race" }` returns `room_created` (was: "Unknown game type")
-- Three game_action wire shapes ALL work (Phase 12 lenient parsing — `type` and `data` are read as `actionName = payload.type ?? payload.action`, `data = payload.data ?? payload`):
-  - Canonical:   `{ type: "race_setup",   data: { text, startAt } }`
-  - Turbo Type:  `{ action: "race_setup", data: { text, startAt } }`  ← this is what their client sends
-  - Flat:        `{ action: "race_setup", text, startAt }`
-- `race_setup` is host-only (room creator). Sets up + broadcasts `state_update { state: { status: "racing", text, startAt, players: [...] } }`
-- `progress` data `{ position, wpm, accuracy }` accepted at any time (the "Game not in progress" gate is bypassed in `TypingRaceRoom.handleGameAction`), relayed via `state_update`
-- `finish` data `{ time, wpm, accuracy }` assigns place in finish-arrival order
-- `game_end { results: { standings: [...] } }` broadcast on all-finish, or 15s after the first finisher (grace window)
-- Rematch supported: a fresh `race_setup` after `game_end` resets progress
-- **Unknown action names return a real `error` message** (Phase 12) — no more silent drops
+**Historical Conquest (`historical_conquest`, HC: The Digital — `HistoricalConquestRelayRoom`):**
+- Pure relay: every `game_action` goes to the other players at once (no turn order, no setup phase, no self-echo unless `echoToSender`); `payload.playerId` is server-stamped; `to` targets one player. Min 2 / max 4.
+- Private games (`isPrivate: true`): 6-letter code, never listed, name "Private game"; join by code or room id. The public Waiting Room (`metadata.hcWaitingRoom`) is listed.
+- Roster in room_created/joined; `playerData` = `uid, rating, wins, losses` only; 60 s rejoin hold, then `player_left` (forfeit). HC's own catch-up: `mp_resume` → `mp_catchup` (`to`) → `mp_resumed`.
+- Only HC's five sites may connect; guests allowed; token support wired but not enabled.
+- Matchmaking still works if used (pairs 2 humans; `matchmake_timeout` at ~20 s; **no server bots**).
+
+**Panic Attack (`panic_attack` / `panic_attack_test`):** host-authoritative relay, signed game tokens (Panic's backend), 2–7 players, 5-letter codes, Quick Match lobby fill, server-checked Huddle quick-chat (Phases 16–17).
+
+**Retired:** the Phase 9 server-side Historical Conquest bot (code kept in `src/bots/games/historical-conquest/`) and the old simulated `HistoricalConquestRoom` (kept, unregistered, as a reference).
 
 ---
 
-### 🏛️ Historical Conquest status: RELAY room LIVE (Phase 15); awaiting their spec re-send for exact-shape verification
+### 🏛️ Historical Conquest status (Phase 18): integration complete, tokens next
 
-**HC answered (partially) via their July 23 letter:** relay room, min 2 / max 4, no server bots, no matchmaking (private room codes via room_list), lockstep client. That is now **live in production** — `historical_conquest` maps to `HistoricalConquestRelayRoom` (pure relay, shape-agnostic, no turn gating). Verified by `test-hc-relay-production.js`.
-
-**⏳ Still open:** their letter referenced an **attached spec with their exact message shapes that never arrived.** The response letter (`docs/conversation/RESPONSE_HC_RELAY_AND_OUTAGE_FIX.md`) asks them to resend it. When it arrives:
-1. Check the relayed-message shape (`game_action` payload `{ type, action, playerId, username, data, timestamp }`, no self-echo by default) against what their client actually expects to RECEIVE — that's the one contract the shape-agnostic relay had to invent. `echoToSender: true` room option exists if they need the echo.
-2. Extend `test-hc-relay-production.js` (or add a sibling) speaking **their exact wire shapes** end-to-end before confirming (Phase 12 lesson).
-3. Adjust matchmaking via `configureGameMatchmaking('historical_conquest', {...})` only if they ask.
-
-The old simulated `HistoricalConquestRoom` (turn order, combat, resources) is still in the codebase, unregistered, as a reference implementation. The Phases 6–10 Unity-WebGL/server-bot plan remains obsolete.
+The long-missing message spec is **no longer needed** — we verified their client (`HistoricalConquest - CardPlay/net.js`) against the relay, and HC confirmed their action list and passed every check on the test server and on prod. Next step is theirs: tell us when they want to test Xogos token sign-in (Phase 18 §6 — email them before setting `GAMEON_HC_SECRET`).
 
 ---
 
 ### Test Server Locally (Optional)
 ```bash
 cd "C:\Users\edwar\Documents\Business\Xogos Gaming\0. Xogos Code\9. Multiplayer Server Services"
-npm run build && npm start
-# then, in another terminal (any port works via env override):
-GAMEON_URL=ws://localhost:3000/ws node test-hc-relay-production.js
+npm run build
+# GAMEON_TEST_SERVER=true lets the student games accept the partners' localhost origins;
+# NODE_ENV=development gives readable logs and the dev JWT fallback.
+PORT=3555 ADMIN_PORT=3556 GAMEON_TEST_SERVER=true NODE_ENV=development node dist/index.js
+# then, in another terminal:
+GAMEON_URL=ws://localhost:3555/ws node test-classroom-production.js
+GAMEON_URL=ws://localhost:3555/ws node test-hc-relay-production.js
 ```
 
 ### Test HC on Production
@@ -1714,7 +1949,7 @@ Before touching anything that ships to prod, re-read "⚠️ READ THIS BEFORE YO
 #### 1. Verify the server is healthy before doing anything
 ```bash
 npm install                              # if first time
-npm test                                 # expect 239 passing
+npm test                                 # expect 339 passing
 npm run build                            # expect clean tsc
 curl https://multiplayer.gameonguy.com/health      # expect {"status":"ok",...}
 node test-hc-relay-production.js         # HC relay: all shapes relay, no gating, outage regression
@@ -1722,18 +1957,30 @@ node test-typing-race-action-key.js      # Turbo Type wire shape (the one prod c
 node test-typing-race-production.js      # canonical typing_race shape (regression)
 node test-hc-no-bot-production.js        # HC matchmaking: matchmake_timeout ~20s, NO bot (~25s wait)
 ```
+Also run `node test-classroom-production.js` (Phase 18) and `node test-panic-attack-production.js` (both game types — see the smoke-test table). All scripts send an allowed `Origin`; override with `ORIGIN=` and point elsewhere with `GAMEON_URL=`.
 If any of these are red, fix that before adding scope. (Do NOT run `test-bot-production.js` expecting success — it asserts the retired bot behavior and fails by design since Phase 14.)
 
 #### 2. Outstanding work, in rough priority order
 
-- **🟡 HC: The Digital — get their spec re-sent** and verify the relay against their exact wire shapes (see "🏛️ Historical Conquest status" above). The relay itself is live and verified shape-agnostically.
-- **🟡 Prod database credentials are BROKEN (found in the Phase 15 log dive, not yet fixed).** The July 21 boot log shows `ER_ACCESS_DENIED_ERROR: Access denied for user 'gameondude'@'172.31.21.49'` against the RDS MySQL host (`gameondude.csd0aykwyxcz...`), 3 retries, then "Database connection failed - running without persistence". The server tolerates this by design (games don't need the DB), but the `DATABASE_URL` on the EB env has a wrong password/user or the RDS grant is missing. Fix it (or remove `DATABASE_URL` if persistence is truly unwanted) — right now every boot burns 3 s retrying and match/user persistence silently does nothing.
-- **🟡 Optional prod env hardening:** rotate `JWT_SECRET` to a 48+ byte random value (`openssl rand -base64 48`; only guests use auth today, so rotation is free); set `ADMIN_API_KEY` if remote admin API access is ever needed. (The leftover `YOUR_ENDPOINT`/`YOUR_PASSWORD` vars were removed in Phase 13.)
-- **🟡 Long-standing uncommitted WIP cleanup — SHRUNK in Phases 13–14.** Now committed: BUILD.md, AuthService, Server.ts, AdminServer, MatchmakingService, HistoricalConquestRoom, both integration guides. Still uncommitted vs HEAD: `src/bots/` (months-old bot changes), `src/database/` repositories, `db/init.sql`, `package.json`/lock, `.ebextensions/03-https.config`, and the website tree (including the Phase 7 auth system). This code has been running on prod for months. When you have a low-risk window, walk the diff file-by-file and commit in logical chunks so git stops lying about reality.
-- **🟢 Short room code (Turbo Type nice-to-have).** Rooms still return UUIDs in `payload.id`. Turbo Type tolerates UUIDs and didn't block on this. Implement as a non-breaking addition — extra field, UUID still valid — so existing games keep working. Don't replace the UUID; the room manager looks rooms up by it.
-- **🟢 Remaining game logic:** Number Munchers (grid math), Panic Attack (social deduction), TimeQuest (chronological ordering). These are registered as stubs against base classes; full rules not yet implemented.
-- **🟢 Production hardening:** CloudWatch alarms, load testing, security audit. SSL/TLS is already done (covered by ACM cert + 03-https.config + custom domain).
-- **🟢 Marketing site auth (Phase 7).** Pages and API routes for login/register/dashboard exist locally under `website/src/app/{login,register,dashboard,verify-email}` and `website/src/app/api/auth/*`. Never committed. If you ship them, also commit them.
+- **🔔 Remind the user first:** the Xogos admin "Multiplayer alerts" dashboard card they asked for (Phase 18 §8). Mostly Xogos platform (PHP) work, modelled on the coin alerts in `../0. Entire Xogos Platform/backend/api/admin/bank/`.
+- **🟠 Alert email:** subscribe the user's chosen address to SNS topic `gameon-alerts`, have them click the confirmation, then fire a test alarm (Phase 18 §8). Until then the four alarms notify nobody.
+- **🟠 Commit Phases 16–18 to git.** Everything on prod since Oct 15 is uncommitted, and HEAD doesn't compile on its own. Commit in reviewable chunks, separate from the older WIP:
+  1. `src/games/xogos/GeoTagRoom.ts` (HEAD already imports it).
+  2. Phase 16–17 Panic Attack: `src/games/xogos/PanicAttackRoom.ts`, `tests/games/PanicAttackRoom.test.ts`, `tests/games/PanicAttackSamples.test.ts`, `tests/fixtures/panic-attack-message-samples.json`, `test-panic-attack-production.js`.
+  3. Phase 16–18 platform: `src/core/{Server,Client,types}.ts`, `src/rooms/{Room,RoomManager}.ts`, `src/auth/AuthService.ts`, `src/matchmaking/MatchmakingService.ts`, `src/games/index.ts`, `src/games/xogos/index.ts`, `src/index.ts`.
+  4. Phase 18 games + tests: `src/games/xogos/{TypingRaceRoom,HistoricalConquestRelayRoom}.ts`, `tests/games/{TypingRaceClassroom,HistoricalConquestPrivate}.test.ts`, `tests/integration/ClassroomRooms.test.ts`, `tests/auth/AuthService.test.ts`, `test-classroom-production.js`, the four Origin-updated smoke tests, `create-zip.js` (build stamp — it was never committed either).
+  5. Docs: `docs/MULTIPLAYER_INTEGRATION_GUIDE.md`, `BUILD.md`.
+- **🟡 Turbo Type follow-through:** they still owe item 1 (token sign-in on the test server, from localhost and their Amplify site) and a real-Chromebook rejoin test — turn the test server on when they're ready. When their **prod** token endpoint is live (Xogos registration + HTTPS on `Turbo-type-env`): copy `TYPING_RACE_TOKEN_SECRET` to prod (user approval; source = template `gameonguy-test-config` or `GAMEON_TURBO_SECRET` on `Turbo-type-env`), confirm with them, and only set `TYPING_RACE_REQUIRE_TOKEN=true` when they ask.
+- **🟡 HC token sign-in:** when HC is ready — turn on the test server, generate a secret, set `HISTORICAL_CONQUEST_TOKEN_SECRET` on the test server, **email HC first**, then set `GAMEON_HC_SECRET` on `Historical-conquest-api-env` at their chosen time; after they pass on the test server, add the secret to prod (guests still allowed); require tokens only when HC says so.
+- **🟡 Prod is pinned to 1 instance.** To scale out later, rooms must first be shared across instances (Redis `RoomSyncService` is written but unconfigured/untested) or the ALB must route a room's players to one instance. Until then scale UP (bigger instance type), not out.
+- **🟡 School-only rooms** (Turbo Type's ask): needs a school/district id in the Xogos login token — a Xogos platform change, not ours.
+- **🟡 Prod database credentials are BROKEN (found Phase 15, still not fixed).** Boot logs show `ER_ACCESS_DENIED_ERROR` for user `gameondude` against the RDS MySQL host, 3 retries, then "running without persistence". Games don't need the DB, but fix the `DATABASE_URL` credentials/grant or remove the variable. CloudWatch log streaming now makes this easy to see.
+- **🟡 Optional prod env hardening:** rotate `JWT_SECRET` to 48+ random bytes (`openssl rand -base64 48`; only guests use it, so rotation is free); set `ADMIN_API_KEY` if remote admin API access is ever needed.
+- **🟡 Unexplained 5-minute "Severe" target-group health event at 5:48 AM Central on Oct 23** — check the CloudWatch logs if it recurs.
+- **🟡 Older uncommitted WIP:** `src/bots/`, `src/database/` repositories, `db/init.sql`, `package.json`/lock, `.ebextensions/03-https.config`, and the website tree (incl. the Phase 7 auth pages). Running on prod for months; walk the diff and commit in logical chunks.
+- **🟢 Remaining game logic:** Number Munchers (grid math), TimeQuest (chronological ordering) — still stubs against base classes.
+- **🟢 Production hardening:** load testing (classroom scale: e.g. 15+ rooms × 2–7 players on one t3.small), security audit. TLS and alerting are done.
+- **🟢 Marketing site auth (Phase 7):** pages and API routes under `website/src/app/{login,register,dashboard,verify-email}` and `website/src/app/api/auth/*` exist locally, never committed.
 
 #### 3. Adding a new game (template)
 Reference implementations, newest first:
@@ -1743,6 +1990,8 @@ Reference implementations, newest first:
 The general recipe is in "Adding a New Game" earlier in this doc. If you build on `TurnBasedRoom`, note the Phase 15 lesson: any timer a room schedules must be cleared in `onGameEnd()`/`dispose()`, or an orphaned callback can wedge the whole process.
 
 For relay-style rooms specifically, the key trick `TypingRaceRoom` uses is overriding `public handleGameAction()` to bypass the base `Room`'s `IN_PROGRESS` gate so actions are accepted as soon as players are in the room. Copy that pattern.
+
+**Phase 18 room hooks** (all opt-in; defaults keep old behavior): `wantsJoinCode()` / `joinCodeLength()` / `isListed()` for codes and listing; `sanitizePlayerData()` (+ `playerDataFromReady()`, `readyBroadcastPayload()`) for per-game player data; `toPublicPlayer()` for what peers see (override it for any child-directed game — the base returns the full PlayerState incl. userId/sessionId); `rejoinHoldMs()` (+ `onPlayerDisconnect()` / `onPlayerReconnect()`) for seat holds; throw `RoomError(message, code)` from `canJoin()` for coded refusals. In a room with a seat hold, look players up with `this.playerIdOf(client)`, not `client.id`. Student games also need an access policy in `registerStudentGamePolicies()` (origins + `childDirected`).
 
 ---
 
@@ -2003,7 +2252,7 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 1. Read this BUILD.md document completely
 2. Review the session history to understand what has been built
 3. Check "What the Next Developer Should Do" section for priorities
-4. Run tests to verify all systems: `npm test` (should pass all 199 tests)
+4. Run tests to verify all systems: `npm test` (should pass all 342 tests)
 5. Verify server starts: `npm run build && npm start`
 6. Test website: `cd website && npm install && npm run dev`
 
@@ -2042,12 +2291,12 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 | Game | Type | Status |
 |------|------|--------|
 | Lightning Round | Trivia | ✅ Complete |
-| Historical Conquest | Relay ("HC: The Digital") | ✅ Live on prod as pure relay (Phase 15); awaiting HC spec re-send for exact-shape verification |
+| Historical Conquest | Relay ("HC: The Digital") | ✅ Live on prod (Phase 15 relay; Phase 18 private games, roster, rejoin) — confirmed by HC |
 | GeoTag | Geography Chase | ✅ Complete |
-| Typing Race | Relay (Turbo Type) | ✅ Live on prod |
+| Typing Race | Relay (Turbo Type) | ✅ Live on prod (Phase 18 classroom rooms) — confirmed by Turbo Type |
 | TimeQuest | Trivia | ❌ Not started |
 | Number Munchers | Real-Time | ❌ Not started |
-| Panic Attack | Social Deduction | ❌ Not started |
+| Panic Attack | Host-relay (browser host runs the match) | ✅ Live on prod (Phase 16); 2–7 players + Huddle chat (Phase 17) |
 
 ### Unity SDK ✅
 - GameOnClient.cs - WebSocket connection
@@ -2073,53 +2322,48 @@ const room = new HistoricalConquestRoom('historical_conquest', {
 
 ## Outstanding Work
 
+The prioritized list lives in **RESUME HERE → "What the Next Developer Should Do" → 2. Outstanding work**. Summary:
+
 ### 🔴 Critical (Blocking)
-*(none — the July 21–23 outage and the HC relay request were both resolved
-in Phase 15)*
+*(none — prod is healthy; both partner teams confirmed Phase 18 on prod)*
 
 ### 🟡 Important
-0. **HC: The Digital exact-shape verification** — relay room is LIVE, but
-   their message-shapes spec never arrived; response letter asked for a
-   re-send. When it comes: verify the relayed-message shape their client
-   expects to receive (incl. whether they need `echoToSender: true`) and
-   extend `test-hc-relay-production.js` to speak their exact wire shapes.
-   See "🏛️ Historical Conquest status" in the RESUME HERE block.
-0.5. **Prod DATABASE_URL credentials rejected by RDS** (found Phase 15) —
-   server boots "without persistence" after 3 access-denied retries. Fix
-   the credentials/grant or drop the env var. Details in the RESUME HERE
-   outstanding-work list.
-1. **Website Auth System** - Code written in Phase 7 but NOT committed
-   - MySQL-based login/register/dashboard
-   - Files in `website/src/app/login`, `/register`, `/dashboard`, `/verify-email`
-   - API routes in `website/src/app/api/auth/*`
-2. **Remaining Games** - Number Munchers, Panic Attack, TimeQuest
-3. **Remaining uncommitted WIP** - `src/bots/`, `src/database/`, `db/init.sql`,
-   `package.json`/lock, `.ebextensions/03-https.config`, website tree
+1. **Remind the user** about the Xogos admin "Multiplayer alerts" dashboard card.
+2. **Alert email subscription** for SNS topic `gameon-alerts` (waiting on the user's address).
+3. **Commit Phases 16–18** to git (HEAD doesn't compile on its own).
+4. **Turbo Type:** token sign-in test (test server) + Chromebook rejoin test; later, prod tokens.
+5. **HC:** token sign-in when they're ready (email them before touching their backend).
+6. **Prod DATABASE_URL credentials rejected by RDS** (since Phase 15).
+7. **Keep prod at 1 instance** until rooms are shared across instances.
+8. **Older uncommitted WIP** (bots, database, website).
 
 ### 🟢 Nice to Have
-1. CloudWatch integration for alerting (SSL/TLS is DONE — ACM cert + 443 listener)
-2. Load testing and performance benchmarks
-3. Follow-up security items: rotate JWT_SECRET (48+ bytes), set ADMIN_API_KEY
-4. Short room codes (Turbo Type nice-to-have)
+1. Load testing at classroom scale
+2. Rotate JWT_SECRET (48+ bytes), set ADMIN_API_KEY
+3. Number Munchers / TimeQuest game logic
+4. Marketing site auth (Phase 7)
 
 ---
 
-*Last Updated: July 23, 2026 (Phase 15 — outage fix + historical_conquest relay room)*
+*Last Updated: October 23, 2026 (end of Phase 18 — classroom rooms for Turbo Type + HC live on prod and confirmed by both teams; refusal alarms live; prod pinned to 1 instance; test server off)*
 *Built for Game On Dude! - www.gameonguy.com*
 *Production Server: wss://multiplayer.gameonguy.com/ws*
-*Production Version: hc-relay-outage-fix-260723-121049 (Phases 13+14+15 live)*
-*GitHub `main` HEAD: 45fa9cf — Phase 15 (Phase 14 = db5f02e, Phase 13 = 4975912)*
-*239 Unit Tests Passing*
-*7 Games Registered (Lightning Round, Historical Conquest [relay], GeoTag, Typing Race, TimeQuest, Number Munchers, Panic Attack)*
-*Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md (AI-assistant version: website/public/gameon-multiplayer-ai-integration-guide.md)*
+*Production Version: phase18-alerts-261023d (Phases 13–18 live)*
+*Test Server: wss://test.multiplayer.gameonguy.com/ws (env gameonguy-test — OFF; template gameonguy-test-config)*
+*GitHub `main` HEAD: 02289af — Phase 15 docs (code 45fa9cf; Phase 14 = db5f02e, Phase 13 = 4975912). Phases 16–18 NOT committed.*
+*342 Unit Tests Passing (= the prod build)*
+*8 Game Types Registered (Lightning Round, Historical Conquest [relay], GeoTag, Typing Race, Panic Attack + panic_attack_test [host-relay], TimeQuest, Number Munchers)*
+*Canonical external-developer doc: docs/MULTIPLAYER_INTEGRATION_GUIDE.md (AI-assistant version: website/public/gameon-multiplayer-ai-integration-guide.md — not updated for Phase 18)*
 *24+ Website Routes*
-*Developed with Claude Opus 4.8 / Claude Fable 5*
+*Developed with Claude Opus 4.8 / Claude Fable 5 / Claude Opus 5.5*
 
-**Current Status:** ✅ Server is DEPLOYED and WORKING (Phases 13+14+15 live as `hc-relay-outage-fix-260723-121049`).
-- ✅ **Phase 15 outage fix live:** the July 21–23 outage (TurnBasedRoom setup-timer → infinite eliminated-player loop → event loop blocked → continuous 504s) is root-caused, fixed, and regression-tested. Timers cancelled on game end/dispose; startTurn ends the game when no active players remain.
-- ✅ **historical_conquest is a RELAY room** (Phase 15): pure relay for the lockstep HC: The Digital client — no turn gating, no setup phase, min 2 / max 4, no bots, private room codes via room_list. Verified by `test-hc-relay-production.js`. ⏳ HC's exact-shapes spec never arrived — response letter asks for a re-send.
-- ✅ Phase 13 security hardening live: JWT fail-fast, guest_ ID namespacing, 1 MiB message cap, admin API gate. Prod env cleaned (junk vars removed).
-- ✅ Server-side bots OFF for all games (opt-in since Phase 14; framework + HC reference bot preserved).
-- ✅ Typing Race relay (`gameType: "typing_race"`) — live since Phase 11, hardened in Phase 12. Verified end-to-end after every deploy by `test-typing-race-action-key.js`.
+**Current Status:** ✅ Server is DEPLOYED and WORKING (Phases 13–18 live as `phase18-alerts-261023d`).
+- ✅ **Classroom rooms for Turbo Type + Historical Conquest** (Phase 18): hidden/private rooms with 6-letter codes, rosters, per-game player data, rejoin holds (90 s / 60 s), error codes, origin allow-lists + child-directed logging. Both teams passed the checklist on the test server and confirmed prod from their live sites.
+- ✅ **Refusal alerts** (Phase 18): game + code logged per refusal, CloudWatch log streaming, four alarms → SNS `gameon-alerts` (⏳ email subscriber pending).
+- ✅ **Prod pinned to 1 instance** after the Oct 23 autoscaling incident.
+- ✅ **Panic Attack host-relay room** (Phases 16–17): game tokens, origin allow-list, child-directed logging, 5-letter join codes, Quick Match lobby fill, Huddle quick-chat, 2–7 players. Working well per the user.
+- ✅ **Phase 15 outage fix live:** TurnBasedRoom timers cancelled on game end/dispose; startTurn ends the game when no active players remain.
+- ✅ Phase 13 security hardening live: JWT fail-fast, guest_ ID namespacing, 1 MiB message cap, admin API gate.
+- ✅ Server-side bots OFF for all games (opt-in since Phase 14).
 
-**Deploy reminder:** use `node create-zip.js` + the AWS CLI sequence in the RESUME HERE block. **`eb deploy` is broken for this repo** (ships git HEAD which is intentionally behind reality).
+**Deploy reminder:** `LABEL=<label> node create-zip.js` + the AWS CLI sequence in the RESUME HERE block. **`eb deploy` is broken for this repo** (ships git HEAD which is intentionally behind reality). Prod deploys need the user's explicit "deploy it", and nothing is "live" until the prod smoke tests pass.
