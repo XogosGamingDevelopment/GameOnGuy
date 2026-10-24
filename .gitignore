@@ -40,3 +40,9 @@ coverage/
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# Docs and env files stay local (user decision, Oct 2026). Amplify builds only
+# website/, which needs just the AI integration guide its download link serves.
+*.md
+!website/public/gameon-multiplayer-ai-integration-guide.md
+.env*
