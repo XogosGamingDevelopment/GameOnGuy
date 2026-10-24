@@ -1724,7 +1724,7 @@ The contact form uses **Mailtrap** for transactional email delivery.
 #### 8. Refusal alerts (user's "option 3")
 - Prod log streaming on: StreamLogs=true, 7-day retention, DeleteOnTerminate=false. App log group: `/aws/elasticbeanstalk/gameonguy-production/var/log/web.stdout.log`. Lines are prefixed `Oct 24 ... web[pid]: ` before the JSON, so use **text** filter patterns (`"Room refused" "historical_conquest" "BAD_REJOIN_TOKEN"`), not JSON patterns.
 - Metric filters `gameon-{historical_conquest,typing_race}-{ACCESS_DENIED,BAD_REJOIN_TOKEN}` → namespace `GameOn`, metric `RoomRefused_<game>_<code>` (verified with `test-metric-filter`). Alarms `GameOn <game> <code> spike`: Sum > 10 per 900 s, missing data = not breaching → SNS topic `arn:aws:sns:us-east-1:016461466120:gameon-alerts`. ≈ $0.40/month.
-- **⏳ The topic has NO email subscriber yet** — waiting on the user for the address (`aws sns subscribe --topic-arn <arn> --protocol email --notification-endpoint <addr>`; the recipient must click the confirmation). Until then alarms fire silently. After subscribing, send a test with `aws cloudwatch set-alarm-state --alarm-name "GameOn historical_conquest ACCESS_DENIED spike" --state-value ALARM --state-reason test`.
+- **✅ Alerts email `zack@xogosgaming.com`** (subscribed and confirmed Oct 24; test alert sent with `aws cloudwatch set-alarm-state --alarm-name "GameOn historical_conquest ACCESS_DENIED spike" --state-value ALARM --state-reason "TEST ..."` — delivery action succeeded). Add more recipients with `aws sns subscribe --topic-arn <arn> --protocol email --notification-endpoint <addr>` (each must click the confirmation).
 - When an HC alarm fires, tell HC what we saw and when (they asked; promised).
 - **User asked to be reminded next session:** build a "Multiplayer alerts" card on the Xogos admin dashboard (memory note `remind-xogos-admin-multiplayer-alerts`). Only add student ids after token sign-in is on, sent straight to Xogos, and only once both teams agree.
 - Git Bash rewrites `/aws/...` arguments as Windows paths — prefix those AWS commands with `MSYS_NO_PATHCONV=1`.
@@ -1760,7 +1760,6 @@ The contact form uses **Mailtrap** for transactional email delivery.
 - Phase 18 (classroom rooms for Turbo Type + Historical Conquest, refusal logging + alarms) is **live on prod and confirmed by both teams** from their live sites. All prod smoke tests pass.
 - **Prod is pinned to exactly 1 instance** (MinSize=MaxSize=1) since the Oct 23 scale-in dropped live races. Keep it that way.
 - **Test server `gameonguy-test` is OFF** (terminated Oct 23; saved template `gameonguy-test-config` brings it back in ~15 min — Phase 18 §7).
-- **Waiting on the user:** the email address for the refusal alarms (SNS topic has no subscriber yet — Phase 18 §8).
 - **Waiting on Turbo Type:** item 1 (token sign-in on the test server) + a real-Chromebook rejoin test; later, word that their prod token endpoint is live (then copy `TYPING_RACE_TOKEN_SECRET` to prod with user approval).
 - **Waiting on HC:** word that they're ready to test token sign-in (email them before setting `GAMEON_HC_SECRET` on their backend).
 - **Git:** Phases 16–18 are committed and **pushed to GitHub `main`** (`86fad54`…`3119ef6`, Oct 24). Still uncommitted: the older WIP (`src/bots/`, `src/database/`, `package.json`/lock, `db/init.sql`, `.ebextensions/03-https.config`, website). **Because of that WIP, a clean checkout still fails `tsc` in `src/database/`:** the working tree (= prod) moved the DB layer from PostgreSQL (`pg`) to MySQL (`mysql2`) and changed `package.json`, but git still has the `pg` versions. Commit that WIP (database + package.json/lock together) to make git match prod.
@@ -1963,7 +1962,6 @@ If any of these are red, fix that before adding scope. (Do NOT run `test-bot-pro
 #### 2. Outstanding work, in rough priority order
 
 - **🔔 Remind the user first:** the Xogos admin "Multiplayer alerts" dashboard card they asked for (Phase 18 §8). Mostly Xogos platform (PHP) work, modelled on the coin alerts in `../0. Entire Xogos Platform/backend/api/admin/bank/`.
-- **🟠 Alert email:** subscribe the user's chosen address to SNS topic `gameon-alerts`, have them click the confirmation, then fire a test alarm (Phase 18 §8). Until then the four alarms notify nobody.
 - **🟠 Git follow-through.** Phases 16–18 were committed Oct 24 in these chunks and pushed to GitHub `main` (done — kept for reference). Next: commit the older WIP (database MySQL switch + `package.json`/lock first — that's what keeps a clean checkout from compiling; then `src/bots/`, `db/init.sql`, `.ebextensions/03-https.config`, website):
   1. `src/games/xogos/GeoTagRoom.ts` (HEAD already imports it).
   2. Phase 16–17 Panic Attack: `src/games/xogos/PanicAttackRoom.ts`, `tests/games/PanicAttackRoom.test.ts`, `tests/games/PanicAttackSamples.test.ts`, `tests/fixtures/panic-attack-message-samples.json`, `test-panic-attack-production.js`.
@@ -2329,7 +2327,6 @@ The prioritized list lives in **RESUME HERE → "What the Next Developer Should 
 
 ### 🟡 Important
 1. **Remind the user** about the Xogos admin "Multiplayer alerts" dashboard card.
-2. **Alert email subscription** for SNS topic `gameon-alerts` (waiting on the user's address).
 3. **Git:** commit the older WIP (database MySQL switch + `package.json`/lock first) so a clean checkout compiles.
 4. **Turbo Type:** token sign-in test (test server) + Chromebook rejoin test; later, prod tokens.
 5. **HC:** token sign-in when they're ready (email them before touching their backend).
@@ -2359,7 +2356,7 @@ The prioritized list lives in **RESUME HERE → "What the Next Developer Should 
 
 **Current Status:** ✅ Server is DEPLOYED and WORKING (Phases 13–18 live as `phase18-alerts-261023d`).
 - ✅ **Classroom rooms for Turbo Type + Historical Conquest** (Phase 18): hidden/private rooms with 6-letter codes, rosters, per-game player data, rejoin holds (90 s / 60 s), error codes, origin allow-lists + child-directed logging. Both teams passed the checklist on the test server and confirmed prod from their live sites.
-- ✅ **Refusal alerts** (Phase 18): game + code logged per refusal, CloudWatch log streaming, four alarms → SNS `gameon-alerts` (⏳ email subscriber pending).
+- ✅ **Refusal alerts** (Phase 18): game + code logged per refusal, CloudWatch log streaming, four alarms → SNS `gameon-alerts` → zack@xogosgaming.com.
 - ✅ **Prod pinned to 1 instance** after the Oct 23 autoscaling incident.
 - ✅ **Panic Attack host-relay room** (Phases 16–17): game tokens, origin allow-list, child-directed logging, 5-letter join codes, Quick Match lobby fill, Huddle quick-chat, 2–7 players. Working well per the user.
 - ✅ **Phase 15 outage fix live:** TurnBasedRoom timers cancelled on game end/dispose; startTurn ends the game when no active players remain.
